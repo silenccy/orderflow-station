@@ -50,47 +50,184 @@ playwright install chromium
 
 ## Get a session token
 
-The websocket authenticates from a **subscribe frame** containing a ~24 h JWT. Two ways
-to obtain one:
+The websocket does **not** authenticate on the handshake — auth rides inside a
+**subscribe frame** that embeds a ~24 h JWT. You need one such frame in `data/`
+before anything can connect. One frame works for **any** 4-letter IDX ticker (the
+symbol field is swapped in software), so you only re-grab when the *token* expires,
+never when you change symbol.
 
-**Automatic (recommended)**
+### Option A — automatic (recommended)
+
 ```bash
-python -m orderflow.token --login     # one time: log in + open any ticker, press Enter
-python -m orderflow.token             # thereafter: headless, ~10 s, writes data/subscribe_auto.txt
+pip install -e ".[token]"
+playwright install chromium
+
+python -m orderflow.token --login   # one time
+python -m orderflow.token           # thereafter: headless, ~10 s
 ```
 
-**Manual** — open Stockbit Pro, `F12` → Console (type `allow pasting` if blocked), paste a
-`WebSocket.send` interceptor, open a ticker, and save the largest binary frame as
-`data/subscribe_NNN.txt` (comma-separated decimal bytes).
+`--login` opens a Chromium window using its own profile (independent of your everyday
+browser). Log into Stockbit, open **any ticker's chart**, then return to the terminal and
+press Enter. It saves the login and remembers that page, so later runs are headless and
+silent, writing `data/subscribe_auto.txt`.
 
-One frame works for **any** 4-letter IDX ticker — the symbol field is swapped in
-software ([protocol notes](docs/protocol.md)). Re-grab only when the token expires.
-
-## Run
+You can also fold it into launch instead of running it separately:
 
 ```bash
-# chart captured data (no connection needed)
-python -m orderflow.app --replay --symbol ASII
+python -m orderflow.capture ASII --grab      # grab, then start capturing
+```
 
-# capture daemon — run this all session; it owns the CSV files
+If the grab fails (Playwright missing, expired login), it prints one line and **falls back
+to your existing frame** rather than blocking startup.
+
+### Option B — manual grab (no Playwright, ~2 minutes)
+
+<details>
+<summary><b>Step-by-step browser tutorial</b></summary>
+
+1. Open **[stockbit.com](https://stockbit.com)** and log in.
+2. Press **F12** → **Console** tab. If pasting is blocked, type `allow pasting` and Enter.
+3. Paste this catcher and press Enter — it hooks outgoing websocket frames and downloads
+   the subscribe frame in exactly the format this project reads:
+
+   ```js
+   (() => {
+     const send = WebSocket.prototype.send;
+     let best = 0;
+     WebSocket.prototype.send = function (data) {
+       try {
+         if (data instanceof ArrayBuffer || ArrayBuffer.isView(data)) {
+           const b = new Uint8Array(data instanceof ArrayBuffer ? data : data.buffer);
+           let sym = null;                       // 0x04 + 4 uppercase letters = a ticker
+           for (let i = 0; i + 4 < b.length; i++) {
+             if (b[i] === 4 && [1,2,3,4].every(j => b[i+j] >= 65 && b[i+j] <= 90)) {
+               sym = String.fromCharCode(b[i+1], b[i+2], b[i+3], b[i+4]); break;
+             }
+           }
+           if (b.length > 200 && sym && b.length > best) {
+             best = b.length;
+             const a = document.createElement('a');
+             a.href = URL.createObjectURL(
+               new Blob([Array.from(b).join(',')], { type: 'text/plain' }));
+             a.download = `subscribe_${b.length}.txt`;
+             a.click();
+             console.log(`captured ${b.length}B subscribe frame for ${sym}`);
+           }
+         }
+       } catch (e) {}
+       return send.apply(this, arguments);
+     };
+     console.log('catcher armed — now open a ticker chart');
+   })();
+   ```
+
+4. **Open a ticker you haven't loaded yet this session** (e.g. ASII). The console logs
+   `captured 922B subscribe frame for ASII` and a `subscribe_922.txt` lands in your
+   Downloads folder. Allow the download if the browser asks.
+5. Move that file into the project's **`data/`** directory:
+
+   ```bash
+   mv ~/Downloads/subscribe_922.txt "data/"
+   ```
+
+**Notes**
+- The catcher only downloads a frame **larger** than the previous one, so you may get a
+  couple of files. **Keep the largest** — that variant carries all four feed channels
+  (book *and* trades); smaller ones carry fewer.
+- The file is comma-separated decimal bytes, e.g. `10,7,49,54,...`. Nothing else parses.
+- Reload the page to disarm the catcher.
+
+</details>
+
+### Token expiry
+
+Tokens last ~24 h and also die if you log in elsewhere (session rotation). **Symptom:** the
+socket connects but no data arrives — with `--debug` you'll see an explicit
+`you are not authorized` status. Fix: grab a fresh frame.
+
+> `data/` is gitignored precisely because these frames identify your account. Never commit
+> or paste one.
+
+## Usage
+
+### Try it without a token
+
+If you have captured CSVs in `data/`, the whole GUI runs offline — no connection, no
+token. This is also the fastest way to explore the interface:
+
+```bash
+python -m orderflow.app --replay --symbol ASII
+```
+
+### A trading session, start to finish
+
+```bash
+# 1. before the open — start the capture daemon in ITS OWN terminal.
+#    It owns the CSV files and must keep running all session.
 python -m orderflow.capture ASII --grab
 
-# live chart alongside the daemon (does NOT write CSVs)
+# 2. any time — open the chart beside it. --view-only means "don't write CSVs".
+#    Close and reopen this freely; the daemon never misses a tick.
 python -m orderflow.app --live --symbol ASII --view-only --debug
 
-# evaluate the regime filter on everything captured so far
+# 3. after the close — fold the day into the regime evaluation
 python -m orderflow.backtest --symbol ASII
 ```
 
-Installed console scripts `orderflow-app`, `orderflow-capture` and `orderflow-backtest`
-do the same thing.
+> **⚠️ Only one process may write the CSVs.** The daemon is the writer; any chart running
+> beside it needs `--view-only`. Two writers interleave rows and corrupt the archive.
+>
+> **⚠️ Don't run the daemon as a background job of a shell that might exit** — if it dies
+> mid-session you lose that stretch of tape (the reconnect backfill only recovers ~40
+> recent trades). Give it a terminal window of its own and confirm it's alive by watching
+> `data/book.csv`'s modification time.
 
-> **Only one process may write the CSVs.** Run the daemon for capture and always add
-> `--view-only` to a chart running beside it — two writers corrupt the files. The daemon
-> keeps recording while you open and close the chart freely.
+Installed console scripts `orderflow-app`, `orderflow-capture`, `orderflow-backtest` are
+equivalent to the `python -m orderflow.*` forms.
 
-Useful flags: `--grab` (refresh the token on launch), `--debug` (diagnostics status bar),
-`--history today|all|none`, `--reset-layout`, `--reset-settings`.
+### Command reference
+
+**`orderflow.app`** — the terminal
+
+| flag | |
+|---|---|
+| `--replay` / `--live` | chart captured CSVs (default) or connect to the feed |
+| `--symbol ASII` | 4-letter IDX ticker |
+| `--view-only` | live mode without writing CSVs — **required** alongside the daemon |
+| `--grab` | refresh the session token on launch |
+| `--debug` | diagnostics status bar (flow, book health, feed age, integrity check) |
+| `--bars time\|tick\|volume`, `--size N` | bar basis and size |
+| `--history today\|all\|none` | how much captured history to preload in live mode |
+| `--shot out.png [--secs N]` | render once to PNG and exit (headless) |
+| `--reset-layout` / `--reset-settings` | recover from an off-screen window or a bad config |
+
+**`orderflow.capture`** — headless daemon: `orderflow.capture [SYMBOL] [--grab]`
+
+**`orderflow.backtest`** — regime evaluation
+
+| flag | |
+|---|---|
+| `--symbol ASII` | which symbol's captured days to evaluate |
+| `--window 20 --warmup 20` | ER lookback (bars) and warm-up gate (minutes) |
+| `--er-trend 0.5 --er-chop 0.3` | label thresholds |
+| `--horizons 5,10,20` | forward horizons in bars |
+| `--fees 0.15,0.25` | %/side buy,sell (IDX retail defaults) |
+| `--csv out.csv` | dump per-signal rows |
+
+**`orderflow.token`** — `--login` (one-time), `--headed` (debug the grab), `--url`, `--wait`
+
+### In the chart
+
+| | |
+|---|---|
+| **⚙ Settings** | tabbed panel — footprint, heatmap, DOM & tape, layout, general. Everything persists. |
+| **⌖ Center / Home** | jump to the latest bars, keeping your zoom |
+| **Follow** | auto-scroll to new bars; panning back into history switches it off |
+| **Δ cells** | switch cluster cells to delta heat |
+| **Big≥ (lots)** | highlight threshold for large prints in the tape |
+
+Chart style (clusters vs candlesticks), imbalance and absorption thresholds, heatmap
+palette and contrast, DOM depth and columns all live in **⚙ Settings**.
 
 ## Architecture
 
