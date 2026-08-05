@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orderflow-station"
+version = "1.0.0"
+description = "IDX orderflow terminal — footprint charts, liquidity heatmap and DOM from the Stockbit Pro market-data websocket"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+keywords = ["trading", "orderflow", "footprint", "market-microstructure", "idx", "indonesia"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Office/Business :: Financial :: Investment",
+    "Environment :: X11 Applications :: Qt",
+]
+
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13",
+    "numpy>=1.24",
+    "websockets>=12",
+]
+
+[project.optional-dependencies]
+# only needed for the automatic session-token grabber (orderflow/token.py)
+token = ["playwright>=1.40"]
+
+[project.scripts]
+orderflow-app = "orderflow.app:main"
+orderflow-capture = "orderflow.capture:main"
+orderflow-backtest = "orderflow.backtest:main"
+
+[tool.setuptools]
+packages = ["orderflow"]

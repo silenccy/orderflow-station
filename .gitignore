@@ -1,0 +1,38 @@
+# ============================================================
+#  SECRETS — never commit
+# ============================================================
+# The subscribe frame embeds a live Stockbit JWT (your account identity, ~24h).
+subscribe*.txt
+grab_config.json
+# Playwright profile = a logged-in Stockbit session on disk.
+pw_profile/
+
+# ============================================================
+#  Captured market data (hundreds of MB, and yours alone)
+# ============================================================
+data/
+*.csv
+*.jsonl
+
+# ============================================================
+#  Python / build
+# ============================================================
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ============================================================
+#  Scratch / render artifacts
+# ============================================================
+shot*.png
+out*.png
+run_out*.txt
+run_err*.txt
+
+# Keep the data dir itself in the tree (contents ignored)
+!data/.gitkeep
