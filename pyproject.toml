@@ -24,10 +24,6 @@ dependencies = [
     "websockets>=12",
 ]
 
-[project.optional-dependencies]
-# only needed for the automatic session-token grabber (orderflow/token.py)
-token = ["playwright>=1.40"]
-
 [project.scripts]
 orderflow-app = "orderflow.app:main"
 orderflow-capture = "orderflow.capture:main"

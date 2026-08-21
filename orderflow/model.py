@@ -193,6 +193,7 @@ class OrderflowModel:
         self.cvd_y = []         # cumulative signed volume
         self.heatmap = []       # [(epoch, {price: value}, mid_price), ...]
         self.trades = []        # raw trade records (for the tape)
+        self.gaps = []          # recorded holes in the tape (see feed.gap_record)
         self.summary = None     # latest session OHLC/turnover dict
         self._cvd = 0.0
         self._last_price = None
@@ -217,6 +218,8 @@ class OrderflowModel:
         elif ev[0] == "summary":
             self.summary = ev[1]
             self._diag["summary_frames"] += 1
+        elif ev[0] == "gap":
+            self.gaps.append(ev[1])
 
     def _on_book(self, ev):
         _, _sym, side, levels, ts = ev
@@ -317,6 +320,19 @@ class OrderflowModel:
             out.append((price, b, s, b + s))
         return out
 
+    def vap_for_bars(self, bar_ids):
+        """Volume profile restricted to `bar_ids` — the visible-range profile.
+        Same row shape as vap_rows(); summing over every bar id reproduces it
+        exactly (the footprint and vap are fed from the same trades)."""
+        agg = {}
+        for b in bar_ids:
+            for price, cell in self.footprint.get(b, {}).items():
+                e = agg.setdefault(price, {"buy": 0.0, "sell": 0.0})
+                e["buy"] += cell["buy"]
+                e["sell"] += cell["sell"]
+        return [(p, v["buy"], v["sell"], v["buy"] + v["sell"])
+                for p, v in sorted(agg.items())]
+
     def total_volume(self):
         return sum(b + s for v in self.vap.values()
                    for b, s in [(v["buy"], v["sell"])])
@@ -383,6 +399,28 @@ class OrderflowModel:
         return [(p, b.bid_freq.get(p), b.bids.get(p),
                  b.ask_freq.get(p), b.asks.get(p)) for p in prices]
 
+    def coverage(self):
+        """(fraction, lost_sec, span_sec) of the session actually captured, or None.
+
+        Measured between the first and last trade rather than against clock hours:
+        that excludes overnight and weekends for free, where a market calendar
+        would need holidays and schedule changes kept correct forever to avoid
+        reporting confident nonsense."""
+        if not self.cvd_x:
+            return None
+        t0, t1 = self.cvd_x[0], self.cvd_x[-1]
+        span = t1 - t0
+        if span <= 0:
+            return None
+        lost = 0.0
+        for g in self.gaps:
+            gs = _parse_iso_epoch(g.get("started")) or 0.0
+            ge = _parse_iso_epoch(g.get("ended")) or gs
+            lo, hi = max(gs, t0), min(ge, t1)     # clip to the session
+            if hi > lo:
+                lost += hi - lo
+        return (max(0.0, span - lost) / span, lost, span)
+
     def diag(self):
         """Diagnostics snapshot for the --debug readout: raw counters plus derived
         health (buy %, spread, heatmap depth, and the footprint==VAP invariant —
@@ -403,6 +441,10 @@ class OrderflowModel:
         d["spread_p90"] = _weighted_pct(self._spread_hist, 90)
         d["spread_mode"] = (self._spread_hist.most_common(1)[0][0]
                             if self._spread_hist else None)
+        d["gaps"] = len(self.gaps)
+        cov = self.coverage()
+        d["coverage"] = None if cov is None else 100.0 * cov[0]
+        d["gap_sec"] = 0.0 if cov is None else cov[1]
         d["vap_sh"] = self.total_volume()
         d["fp_sh"] = sum(c["buy"] + c["sell"]
                          for cells in self.footprint.values() for c in cells.values())

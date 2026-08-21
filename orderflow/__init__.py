@@ -10,7 +10,8 @@ Layered so each piece is usable on its own:
     app       PySide6/pyqtgraph GUI: footprint, liquidity heatmap, DOM, tape
     backtest  walk-forward evaluation of the regime filter on captured days
     capture   headless capture daemon (no GUI)
-    token     Playwright session-token grabber
+    startup   the dialogs that replace the command line
+    diagnostics  crash/launch logging and --doctor (no Qt at import time)
 
 Typical use:
     python -m orderflow.app --replay --symbol ASII
@@ -19,4 +20,5 @@ Typical use:
 """
 
 __version__ = "1.0.0"
-__all__ = ["paths", "feed", "model", "app", "backtest", "capture", "token"]
+__all__ = ["paths", "feed", "model", "app", "backtest", "capture", "startup",
+           "diagnostics"]

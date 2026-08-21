@@ -25,8 +25,19 @@ BOOK_CSV = str(DATA_DIR / "book.csv")
 TRADES_CSV = str(DATA_DIR / "trades.csv")
 SUMMARY_CSV = str(DATA_DIR / "summary.csv")
 RAW_LOG = str(DATA_DIR / "capture_raw.jsonl")
+# every hole in the tape: when the feed dropped, for how long, and why.
+# Recorded rather than inferred, so replay and the backtest work from fact.
+GAPS_CSV = str(DATA_DIR / "gaps.csv")
+
+# capture coordination — exactly one process may write the CSVs.
+# capture.lock's MTIME is the heartbeat (see capture.writer_status: a pid probe
+# is unusable on Windows, where os.kill with any ordinary signal terminates the
+# target). capture.stop is a cooperative shutdown request, so the writer closes
+# its CsvSink cleanly instead of being killed mid-write.
+CAPTURE_LOCK = DATA_DIR / "capture.lock"
+CAPTURE_STOP = DATA_DIR / "capture.stop"
+CAPTURE_LOG = DATA_DIR / "capture.log"
 
 # session auth (SECRET — never commit)
-SUBSCRIBE_AUTO = DATA_DIR / "subscribe_auto.txt"   # written by the token grabber
-PW_PROFILE = DATA_DIR / "pw_profile"               # Playwright login profile
-GRAB_CONFIG = DATA_DIR / "grab_config.json"        # saved ticker URL
+# subscribe_*.txt lives here too: captured by hand from the browser console
+# (see README "Get a session token"). feed.load_subscribe_frame() finds it.
