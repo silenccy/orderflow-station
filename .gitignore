@@ -3,8 +3,9 @@
 # ============================================================
 # The subscribe frame embeds a live Stockbit JWT (your account identity, ~24h).
 subscribe*.txt
+# Legacy: the Playwright token grabber is gone, but an older checkout may have
+# left a logged-in Stockbit session on disk. Keep ignoring it.
 grab_config.json
-# Playwright profile = a logged-in Stockbit session on disk.
 pw_profile/
 
 # ============================================================

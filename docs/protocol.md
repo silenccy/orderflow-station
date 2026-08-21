@@ -100,6 +100,11 @@ Wrapper field 9: `2` last, `3` volume (shares), `4` high, `5` low, `6` open,
 
 - Frames arrive interleaved; the parser dispatches on shape, not order.
 - The reconnect backfill replays recent trades — **dedup on trade id (field 9)** or
-  the tape doubles up (`model` does this).
+  the tape doubles up. `feed.live_feed` keeps its `seen_ids` set *across* reconnects
+  for exactly this reason, and `model` dedups again on the way in.
+- `feed.live_feed` reconnects on its own with a jittered backoff, re-reading the
+  subscribe frame each attempt so a freshly grabbed token heals a live session. Every
+  outage is written to `data/gaps.csv`; the stale-token reply above is recorded as
+  cause `token` rather than `disconnect`, because retrying cannot fix it.
 - One captured frame + `make_subscribe_for` covers every symbol, so a re-capture is
   only needed when the **token** expires, not when you change ticker.

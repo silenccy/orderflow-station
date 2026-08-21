@@ -1,6 +1,6 @@
 """
-of_feed.py — Stockbit IDX market-data feed, shared by the headless capture
-(stockbit_capture.py) and the orderflow chart (of_app.py).
+feed.py — Stockbit IDX market-data feed, shared by the capture daemon
+(capture.py) and the workstation (app.py).
 
 Owns the websocket protocol, frame parsing, CSV persistence, and a single unified
 event stream consumed by both live and replay modes.

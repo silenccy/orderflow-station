@@ -1,5 +1,5 @@
 """
-of_model.py — orderflow state + aggregation (pure Python/numpy, no Qt).
+model.py — orderflow state + aggregation (pure Python/numpy, no Qt).
 
 Feed it the ('book'|'trade', ...) events from of_feed (live or replay) and it
 maintains everything the chart panels need:

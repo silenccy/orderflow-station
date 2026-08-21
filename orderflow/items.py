@@ -16,6 +16,43 @@ pg.setConfigOption("foreground", "#9aa0a6")
 pg.setConfigOption("imageAxisOrder", "row-major")
 pg.setConfigOptions(antialias=True)
 
+# The plots are painted dark by pyqtgraph, but Qt widgets (the DOM ladder and the
+# trade tape are QTableWidgets) follow the platform palette and came out white
+# against them. One stylesheet on the main window covers every child.
+DARK_QSS = """
+QMainWindow, QDockWidget, QWidget { background: #0b0d0e; color: #d8dde2; }
+QTableWidget, QTableView {
+    background: #0b0d0e; alternate-background-color: #101416;
+    color: #d8dde2; gridline-color: #1c2226;
+    selection-background-color: #1d2b3a; selection-color: #ffffff;
+    border: none;
+}
+QHeaderView::section {
+    background: #12171a; color: #8b939b; border: 0;
+    border-bottom: 1px solid #23282d; padding: 2px 4px;
+}
+QTableCornerButton::section { background: #12171a; border: 0; }
+QToolBar { background: #0e1114; border: 0; spacing: 2px; }
+QToolButton { color: #d8dde2; }
+QToolButton:hover { background: #1b2126; border-radius: 3px; }
+QComboBox, QSpinBox, QLineEdit {
+    background: #12171a; color: #d8dde2;
+    border: 1px solid #23282d; border-radius: 3px; padding: 1px 4px;
+}
+QComboBox QAbstractItemView {
+    background: #12171a; color: #d8dde2; selection-background-color: #1d2b3a;
+}
+QCheckBox, QLabel, QRadioButton { color: #d8dde2; }
+QMenu { background: #12171a; color: #d8dde2; border: 1px solid #23282d; }
+QMenu::item:selected { background: #1d2b3a; }
+QScrollBar:vertical, QScrollBar:horizontal { background: #0b0d0e; border: 0; }
+QScrollBar::handle { background: #262d33; border-radius: 4px; min-height: 18px; }
+QScrollBar::handle:hover { background: #333c44; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+QToolTip { background: #12171a; color: #d8dde2; border: 1px solid #2c343a; }
+"""
+
 BULL = QtGui.QColor(63, 226, 106)
 BEAR = QtGui.QColor(255, 84, 84)
 POC = QtGui.QColor(255, 224, 102)

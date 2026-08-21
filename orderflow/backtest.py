@@ -1,13 +1,13 @@
 """
-of_backtest.py — walk-forward backtest of the regime filter (of_model.regime()).
+backtest.py — walk-forward backtest of the regime filter (model.regime()).
 
 Pure Python, no Qt. Replays captured trades through the SAME model the live chip
 uses, evaluating the regime only at bar close (no lookahead), purged at capture
 gaps, and reports (1) per-label forward statistics and (2) a toy long-only
 strategy vs buy-&-hold with a within-day label-permutation p-value.
 
-    python of_backtest.py --symbol ASII
-    python of_backtest.py --symbol ASII --horizons 5,10,20 --fees 0.15,0.25 --csv out.csv
+    python -m orderflow.backtest --symbol ASII
+    python -m orderflow.backtest --symbol ASII --horizons 5,10,20 --csv out.csv
 
 Honesty: with only a handful of captured days the output is direction-of-evidence,
 not proof. Re-run as the capture archive grows.

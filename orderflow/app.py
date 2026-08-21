@@ -32,14 +32,21 @@ diagnostics.install()
 # anything that imports PySide6, which includes items/panels below.
 if "--shot" in sys.argv and "QT_QPA_PLATFORM" not in os.environ:
     os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    # The offscreen plugin ships no font backend on Windows: without a font dir
+    # it loads ZERO families and every label renders as a tofu box, which is why
+    # headless screenshots looked broken. Point it at the system fonts.
+    if "QT_QPA_FONTDIR" not in os.environ:
+        _fonts = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Fonts")
+        if os.path.isdir(_fonts):
+            os.environ["QT_QPA_FONTDIR"] = _fonts
 
 from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
 
 from . import capture as of_capture  # noqa: E402
 from . import panels as of_panels  # noqa: E402
 from . import startup as of_startup  # noqa: E402
-from .items import (BEAR, BULL, DEFAULTS, MODEL_CFG_KEYS, SPEC_BY_KEY,  # noqa: E402
-                    SettingsDialog)
+from .items import (BEAR, BULL, DARK_QSS, DEFAULTS,  # noqa: E402
+                    MODEL_CFG_KEYS, SPEC_BY_KEY, SettingsDialog)
 
 def _daemon_exe():
     """pythonw.exe when we can find it, so the detached recorder never flashes
@@ -172,6 +179,7 @@ class MainWindow(QtWidgets.QMainWindow):
                  debug=False, live=False, persist=False, settings=None):
         super().__init__()
         self.setWindowTitle("Orderflow Station")
+        self.setStyleSheet(DARK_QSS)   # Qt widgets default to the light platform
         self.resize(1700, 1000)      # clamped to the real screen by _ensure_on_screen
         self.events = dict(events)   # symbol -> [event]
         self.models = {}             # (symbol, bar_kind, bar_size) -> OrderflowModel
@@ -1225,8 +1233,10 @@ class MainWindow(QtWidgets.QMainWindow):
 # ============================================================
 def main():
     ap = argparse.ArgumentParser(description="IDX orderflow workstation")
-    ap.add_argument("--live", action="store_true", help="connect + chart live")
-    ap.add_argument("--replay", action="store_true", help="chart captured CSVs (default)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--live", action="store_true", help="connect + chart live")
+    mode.add_argument("--replay", action="store_true",
+                      help="chart captured CSVs (default)")
     ap.add_argument("--symbol", nargs="+", default=["ASII"],
                     help="one or more 4-letter IDX tickers; the first three seed "
                          "link groups A, B and C")

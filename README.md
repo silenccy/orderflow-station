@@ -6,6 +6,10 @@ order-book and tick data from the Stockbit Pro market-data websocket.
 
 ![Orderflow Station](docs/img/preview.png)
 
+<sub>Screenshots are rendered headlessly by `tools/make_previews.py` from a <b>synthetic</b>
+random-walk session — the shapes are real, the prices are invented. Regenerate them with
+<code>python tools/make_previews.py</code>.</sub>
+
 > ### ⚠️ Read this first
 > - **Unofficial and reverse-engineered.** This project is **not affiliated with,
 >   endorsed by, or supported by Stockbit.** It speaks an undocumented private
@@ -37,6 +41,26 @@ order-book and tick data from the Stockbit Pro market-data websocket.
 Every panel is an independent dock: drag it anywhere, snap it, split it, tab it, float it
 onto a second monitor, or close it. Open more than one of the same kind on different symbols
 or bar bases. The arrangement is saved on exit and restored on launch.
+
+**Footprint, delta footer and volume profile** — bid×ask clusters with a gold POC, VWAP and
+value-area lines, per-bar delta underneath.
+
+![Footprint](docs/img/preview-footprint.png)
+
+**Liquidity heatmap and depth curve** — resting size over time with the price line and OHLC
+candles overlaid, and cumulative book depth beside it.
+
+![Heatmap](docs/img/preview-heatmap.png)
+
+**Order book, tape and watchlist** — centred ladder with depth bars, BBO highlight, Σ totals
+and book imbalance.
+
+![Order book](docs/img/preview-dom-tape.png)
+
+**Capture integrity** — every hole in the tape with its cause and duration, the share of the
+session captured, and the CVD line broken exactly where the data is missing.
+
+![Capture integrity](docs/img/preview-integrity.png)
 
 Everything else is tunable from a tabbed **⚙ Settings** panel and persists across restarts.
 
@@ -344,7 +368,8 @@ orderflow/
   capture.py   the recorder, and the writer lock every writer shares
 Orderflow Station.bat   double-click launcher (pythonw = no console window)
 Diagnose.bat            double-click when it will not start (prints --doctor)
-tools/         standalone helpers (protobuf frame decoder, multi-subscribe probe)
+tools/         helpers: protobuf frame decoder, multi-subscribe probe,
+               preview renderer
 docs/          protocol reference + images
 data/          captured CSVs, gaps.csv, session frames, capture.lock/.stop/.log
                — gitignored

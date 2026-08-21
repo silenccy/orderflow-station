@@ -558,6 +558,25 @@ hung until they did.
 
 ---
 
+### Two rendering defects that predate all of this
+
+Found while generating the README previews, and visible in the repo's own original
+screenshot (`docs/img/bm3.png`, since removed):
+
+- **Qt widgets followed the light platform palette.** The plots are painted dark by
+  pyqtgraph, but the DOM ladder and trade tape are `QTableWidget`s and came out white
+  against them. `items.DARK_QSS`, applied once on the main window, covers every child.
+- **The offscreen plugin loads zero font families on Windows** unless `QT_QPA_FONTDIR`
+  is set, so every headless screenshot rendered its labels as tofu boxes — including the
+  `--shot` render the README recommends as a verification step. `--shot` now points it at
+  the system font directory.
+
+`tools/make_previews.py` renders the README images from a synthetic random-walk session
+whose outages genuinely omit data, so the gap ledger and the CVD line-break are visible
+rather than merely annotated. The README states that the prices are invented.
+
+---
+
 ## 10. Risk & compliance
 
 Stated plainly by the project itself, and worth repeating:
