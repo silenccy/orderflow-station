@@ -437,9 +437,18 @@ release:
 2. Move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version and
    add its compare link.
 3. `pytest` — the version suite checks the two agree and that the release is documented.
-4. Merge to `main`, then tag **that** commit: `git tag -a vX.Y.Z -m "..."` and
-   `git push origin vX.Y.Z`. Tag the mainline, not the feature branch, or the tag points
-   at something that never shipped.
+4. Merge to `main` **first**, then tag that commit — tagging a feature branch points the
+   release at something that may never ship in that form:
+
+```bash
+git checkout main
+git pull
+git tag -a vX.Y.Z -m "orderflow-station X.Y.Z"
+git push origin vX.Y.Z
+```
+
+   One command per line on purpose: Windows PowerShell 5.1 rejects `&&` as a statement
+   separator, so chained one-liners fail to parse there.
 
 - Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 - `python -m compileall -q orderflow tools tests` — quick syntax gate.
