@@ -412,7 +412,21 @@ thresholds on fewer than 8 captured days.
 
 ## Development
 
-- `python -m py_compile orderflow/*.py` — quick syntax gate.
+```bash
+pip install -e ".[dev]"
+pytest                       # 10 suites, ~12s
+pytest -k reconnect          # one of them
+python tests/run_all.py      # same, without pytest
+```
+
+Every suite runs in its own process against a throwaway `ORDERFLOW_DATA`, so a test can
+never touch your real archive — and so the ones that monkeypatch module globals or build a
+`QApplication` cannot leak into each other. [tests/README.md](tests/README.md) explains the
+layout and what each suite covers. CI runs the same command on Windows for Python 3.10 and
+3.12.
+
+- Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+- `python -m compileall -q orderflow tools tests` — quick syntax gate.
 - The GUI is three modules: `items.py` (colours, settings spec, pyqtgraph drawing
   primitives), `panels.py` (every widget as a `QDockWidget` subclass) and `app.py`
   (window, model registry, link groups, feed threads). Adding a widget means one class in
@@ -431,6 +445,7 @@ thresholds on fewer than 8 captured days.
 - The writer lock lives in `capture.py` (`writer_status` / `take_lock` / `touch_lock` /
   `request_stop`). Any new component that writes the archive must take the lock and
   heartbeat it, or other writers will correctly conclude it is dead.
+- `tools/make_previews.py` regenerates the README images from a synthetic session.
 - Frame formats, units and gotchas: **[docs/protocol.md](docs/protocol.md)**.
 
 Two units traps worth knowing before touching aggregation code: order-book `value` is

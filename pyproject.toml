@@ -24,6 +24,9 @@ dependencies = [
     "websockets>=12",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
 [project.scripts]
 orderflow-app = "orderflow.app:main"
 orderflow-capture = "orderflow.capture:main"
@@ -31,3 +34,10 @@ orderflow-backtest = "orderflow.backtest:main"
 
 [tool.setuptools]
 packages = ["orderflow"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# Only test_suites.py is collected; it launches each suite in tests/suites/ as a
+# separate process. See tests/_runner.py for why that isolation is required.
+python_files = ["test_suites.py"]

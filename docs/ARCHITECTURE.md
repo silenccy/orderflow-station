@@ -1,7 +1,10 @@
-# Orderflow Station — architecture & research notes
+# Orderflow Station — architecture notes
 
-Notes from a full read of the source at commit `b80e257`. Untracked file (`.gitignore`
-doesn't cover `*.md`) — delete freely.
+Design rationale and a full read of the source. Written against upstream commit `b80e257`
+and kept current as the project diverged from it; §9 records what changed and why.
+
+For the wire protocol see [protocol.md](protocol.md); for how to run the tests see
+[../tests/README.md](../tests/README.md).
 
 **What it is:** an unofficial orderflow terminal for Indonesian equities (IDX). It speaks
 Stockbit Pro's private, undocumented market-data websocket, hand-decodes the protobuf, and
