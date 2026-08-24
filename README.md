@@ -437,17 +437,32 @@ release:
 2. Move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version and
    add its compare link.
 3. `pytest` — the version suite checks the two agree and that the release is documented.
-4. Merge to `main` **first**, then tag that commit — tagging a feature branch points the
-   release at something that may never ship in that form:
+4. Merge to `main` **first**, then tag that commit. Check what you are standing on before
+   tagging: `git checkout main` on an unmerged repo silently lands you on the *old* tip,
+   and the tag then marks code that never contained the release.
 
 ```bash
 git checkout main
+```
+```bash
 git pull
+```
+```bash
+python -c "import orderflow; print(orderflow.__version__)"
+```
+
+   That must print the version you are about to tag. If it prints the *previous* version
+   the merge has not landed — stop. Because the version is single-sourced, this is the one
+   check that cannot be fooled by being on the wrong commit. Then:
+
+```bash
 git tag -a vX.Y.Z -m "orderflow-station X.Y.Z"
+```
+```bash
 git push origin vX.Y.Z
 ```
 
-   One command per line on purpose: Windows PowerShell 5.1 rejects `&&` as a statement
+   One command per block on purpose: Windows PowerShell 5.1 rejects `&&` as a statement
    separator, so chained one-liners fail to parse there.
 
 - Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
