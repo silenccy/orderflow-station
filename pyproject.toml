@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orderflow-station"
-version = "1.0.0"
+# Single source of truth is orderflow.__version__ -- a hardcoded copy here
+# and another in the package is a guaranteed drift.
+dynamic = ["version"]
 description = "IDX orderflow terminal — footprint charts, liquidity heatmap and DOM from the Stockbit Pro market-data websocket"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -34,6 +36,9 @@ orderflow-backtest = "orderflow.backtest:main"
 
 [tool.setuptools]
 packages = ["orderflow"]
+
+[tool.setuptools.dynamic]
+version = {attr = "orderflow.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

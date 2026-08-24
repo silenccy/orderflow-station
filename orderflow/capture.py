@@ -37,6 +37,7 @@ import sys
 import time
 from datetime import datetime
 
+from . import __version__
 from . import feed as of_feed
 from .paths import CAPTURE_LOCK, CAPTURE_LOG, CAPTURE_STOP
 
@@ -262,6 +263,9 @@ One frame covers every symbol; the ticker is swapped in software.
 def main():
     """CLI entry point: orderflow-capture [SYMBOL ...]"""
     flags = {a for a in sys.argv[1:] if a.startswith("-")}
+    if "--version" in flags:
+        print("orderflow-station %s" % __version__)
+        return
     if flags & {"--help", "-h"}:
         print(USAGE)
         return

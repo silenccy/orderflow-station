@@ -425,6 +425,22 @@ never touch your real archive — and so the ones that monkeypatch module global
 layout and what each suite covers. CI runs the same command on Windows for Python 3.10 and
 3.12.
 
+### Releasing
+
+The version lives in **one** place, `orderflow/__init__.py`; `pyproject.toml` derives it
+and `tests/suites/version.py` fails the build if a second copy ever reappears. To cut a
+release:
+
+1. Bump `__version__` — MAJOR if an existing setup breaks (a removed flag, a changed
+   on-disk format, a public function that behaves differently), MINOR for new capability,
+   PATCH for fixes.
+2. Move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version and
+   add its compare link.
+3. `pytest` — the version suite checks the two agree and that the release is documented.
+4. Merge to `main`, then tag **that** commit: `git tag -a vX.Y.Z -m "..."` and
+   `git push origin vX.Y.Z`. Tag the mainline, not the feature branch, or the tag points
+   at something that never shipped.
+
 - Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 - `python -m compileall -q orderflow tools tests` — quick syntax gate.
 - The GUI is three modules: `items.py` (colours, settings spec, pyqtgraph drawing

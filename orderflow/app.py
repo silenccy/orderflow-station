@@ -18,6 +18,7 @@ import sys
 import time
 from datetime import datetime
 
+from . import __version__
 from . import diagnostics
 from . import feed as of_feed
 from . import model as of_model
@@ -1233,6 +1234,8 @@ class MainWindow(QtWidgets.QMainWindow):
 # ============================================================
 def main():
     ap = argparse.ArgumentParser(description="IDX orderflow workstation")
+    ap.add_argument("--version", action="version",
+                    version="orderflow-station %s" % __version__)
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--live", action="store_true", help="connect + chart live")
     mode.add_argument("--replay", action="store_true",

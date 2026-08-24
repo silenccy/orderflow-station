@@ -19,6 +19,8 @@ Typical use:
     python -m orderflow.backtest --symbol ASII
 """
 
-__version__ = "1.0.0"
+# Semantic versioning. MAJOR when the CLI, the on-disk formats or the
+# public functions change in a way that breaks an existing setup.
+__version__ = "2.0.0"
 __all__ = ["paths", "feed", "model", "app", "backtest", "capture", "startup",
            "diagnostics"]

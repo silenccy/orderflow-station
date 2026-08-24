@@ -1,8 +1,21 @@
 # Changelog
 
-Notable changes to Orderflow Station. Dates are the working date, not a release.
+Notable changes to Orderflow Station. Format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+**MAJOR** is bumped when an existing setup breaks: a removed CLI flag, a changed
+on-disk format, or a public function that behaves differently. **MINOR** adds
+capability without breaking anything. **PATCH** is fixes only.
+
+## [Unreleased]
+
+## [2.0.0] - 2026-08-21
+
+Major, because three things break an existing setup: the `--grab` flag and the
+`[token]` extra are gone with the Playwright grabber, `orderflow.token` no longer
+exists, and `live_feed()` no longer returns when the socket drops -- it now retries
+forever unless you pass `reconnect=False`.
 
 ### Added
 
@@ -21,7 +34,7 @@ Notable changes to Orderflow Station. Dates are the working date, not a release.
 - **Multi-symbol recording.** One process, one websocket per symbol, one shared `CsvSink`.
 - **Test suite.** 10 suites, 61 checks, each in its own process against a throwaway
   archive. `pytest` or `python tests/run_all.py`. CI on Windows for Python 3.10 and 3.12.
-- `--doctor`, `--ask`, `orderflow-capture --status` / `--stop`,
+- `--doctor`, `--ask`, `--version`, `orderflow-capture --status` / `--stop`,
   `tools/probe_multisub.py`, `tools/make_previews.py`.
 
 ### Changed
@@ -43,6 +56,8 @@ Notable changes to Orderflow Station. Dates are the working date, not a release.
   old rule would have kept the dead one indefinitely.
 - Dark palette applied to the tables and title bars, which were rendering light against
   the dark charts.
+- The version is single-sourced from `orderflow.__version__`; `pyproject.toml` derives it
+  instead of keeping a second copy that drifts.
 - CVD line-breaks use recorded gaps, keeping the >5-minute heuristic only as a fallback
   for archives captured before gaps were logged.
 
@@ -67,3 +82,13 @@ Notable changes to Orderflow Station. Dates are the working date, not a release.
 - The TREND/CHOP regime filter is **unvalidated on IDX data**. Over six captured days and
   201 evaluations only `CHOP` did measurable work. Treat it as a stay-out filter.
 - Session tokens last ~24 h and must be grabbed by hand from a browser console.
+
+## [1.0.0] - 2026-08-06
+
+Initial public release: footprint charts, liquidity heatmap, volume profile, CVD,
+DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
+walk-forward regime backtest.
+
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/silenccy/orderflow-station/compare/v1.0.0...v2.0.0
+[1.0.0]: https://github.com/silenccy/orderflow-station/releases/tag/v1.0.0

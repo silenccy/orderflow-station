@@ -19,6 +19,7 @@ import random
 import sys
 from collections import Counter, defaultdict
 
+from . import __version__
 from . import feed as of_feed
 from . import model as of_model
 
@@ -217,6 +218,8 @@ def permutation_test(segs, actual, half_spread, fee_buy, fee_sell, allow_short,
 # ---------- report ----------
 def main():
     ap = argparse.ArgumentParser(description="Walk-forward backtest of the regime filter")
+    ap.add_argument("--version", action="version",
+                    version="orderflow-station %s" % __version__)
     ap.add_argument("--symbol", default="ASII")
     ap.add_argument("--bar-size", type=int, default=60)
     ap.add_argument("--window", type=int, default=20)
