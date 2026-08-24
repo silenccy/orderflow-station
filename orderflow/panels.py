@@ -299,15 +299,18 @@ class FootprintPanel(ChartPanel):
         self.p.vb.sigRangeChangedManually.connect(self._manual)
 
         dot = QtCore.Qt.PenStyle.DotLine
+        # Staggered x positions. VWAP normally sits INSIDE the value area, so
+        # VWAP/VAH/VAL can land within a tick of each other; sharing an x made
+        # the labels overprint into an unreadable smear.
         self.vwap_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#5ad1ff", width=1, style=dot),
                                          label="VWAP {value:.0f}",
                                          labelOpts={"position": 0.04, "color": "#5ad1ff"})
         self.vah_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#9aa0a6", width=1, style=dot),
                                         label="VAH {value:.0f}",
-                                        labelOpts={"position": 0.04, "color": "#9aa0a6"})
+                                        labelOpts={"position": 0.24, "color": "#9aa0a6"})
         self.val_line = pg.InfiniteLine(angle=0, pen=pg.mkPen("#9aa0a6", width=1, style=dot),
                                         label="VAL {value:.0f}",
-                                        labelOpts={"position": 0.12, "color": "#9aa0a6"})
+                                        labelOpts={"position": 0.44, "color": "#9aa0a6"})
         for ln in (self.vwap_line, self.vah_line, self.val_line):
             ln.setVisible(False)
             self.p.addItem(ln, ignoreBounds=True)
@@ -900,14 +903,36 @@ class DomPanel(Panel):
             hdr.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Interactive)
             hdr.setStretchLastSection(True)
             blob = st.value(self._header_key(pro))
+            restored = False
             if isinstance(blob, (QtCore.QByteArray, bytes, bytearray)):
                 try:
-                    hdr.restoreState(blob)
+                    restored = bool(hdr.restoreState(blob))
                 except (TypeError, ValueError):
-                    pass
+                    restored = False
+            if not restored:
+                # No widths dragged yet. Interactive leaves every section at its
+                # ~100px default, and stretchLastSection only GROWS the last one
+                # into spare room -- it never shrinks the others -- so a narrow
+                # dock clipped the final column on a fresh install. Divide the
+                # viewport instead, deferred so the widget has its real width.
+                QtCore.QTimer.singleShot(0, self._fit_columns)
         else:                                    # classic auto-fit
             hdr.setStretchLastSection(False)
             hdr.setSectionResizeMode(QtWidgets.QHeaderView.ResizeMode.Stretch)
+
+    def _fit_columns(self):
+        """Share the viewport evenly across the ladder's columns. Used only when
+        no dragged widths exist -- afterwards the saved state wins."""
+        try:
+            hdr = self.dom.horizontalHeader()
+            cols = self.dom.columnCount()
+            width = self.dom.viewport().width()
+            if cols and width > 0:
+                each = max(40, width // cols)
+                for c in range(cols):
+                    hdr.resizeSection(c, each)
+        except RuntimeError:
+            pass                                 # panel closed before the timer ran
 
     def save_header(self):
         if self._dom_mode and self._dom_mode[1]:

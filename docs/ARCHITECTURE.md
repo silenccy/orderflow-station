@@ -65,7 +65,7 @@ the browser catcher keeps only the largest frame it sees.
 
 ### The symbol-swap trick
 
-The single cleverest thing in the codebase ([feed.py:93-111](orderflow/feed.py:93)):
+The single cleverest thing in the codebase ([feed.py](../orderflow/feed.py)):
 
 ```python
 if base[i] == 0x04 and all(65 <= base[i + 1 + j] <= 90 for j in range(4)):
@@ -80,7 +80,7 @@ captured frame therefore subscribes **any** 4-letter IDX ticker. You re-grab whe
 ### Frame types — dispatched on shape, not order
 
 `live_feed` tries three parsers in sequence and takes the first that matches
-([feed.py:365-392](orderflow/feed.py:365)):
+([feed.py](../orderflow/feed.py)):
 
 1. **Book** — a protobuf wrapper around *pipe-delimited ASCII*, matched by regex
    `([A-Z]{4})\|(OFFER|BID)\|([0-9;|]+)`. Levels are `price;freq;value` triplets, ~60 per
@@ -114,7 +114,7 @@ split is materially less trustworthy than live ticks.
 ## 3. Persistence & replay (`feed.py`)
 
 `CsvSink` appends to three CSVs plus a raw JSONL, **flushing on every single write**
-([feed.py:285-307](orderflow/feed.py:285)) so a hard kill never loses data.
+([feed.py](../orderflow/feed.py)) so a hard kill never loses data.
 
 | File | Columns |
 |---|---|
@@ -244,7 +244,7 @@ painters — this is hand-rolled rendering, not stock pyqtgraph plots.
 
 `FeedThread.run()` creates a private asyncio event loop, iterates `live_feed()`, and
 **batches events for ~100 ms** before emitting `batch(list)` to the main thread
-([app.py:1697-1710](orderflow/app.py:1697)). `_on_live_batch` feeds the model incrementally
+([app.py](../orderflow/app.py)). `_on_live_batch` feeds the model incrementally
 and sets `_dirty`; a `QTimer` at `live_hz` (default 7 Hz, floored at 40 ms) calls `refresh()`
 only if dirty. Shutdown is clean: `closeEvent` → `call_soon_threadsafe(task.cancel)` → `wait(2000)`.
 

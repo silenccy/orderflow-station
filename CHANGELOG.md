@@ -10,6 +10,24 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- README badges (CI, latest tag, Python, licence) and a Mermaid data-flow diagram of
+  `feed → model → panels`, rendered natively by GitHub.
+- Issue and pull-request templates, `CONTRIBUTING.md` and `SECURITY.md`. The security
+  policy leads with the real hazard: `subscribe_*.txt` is a live account credential, not
+  a config file.
+
+### Fixed
+
+- VWAP and VAH price labels shared an x position and overprinted into an unreadable smear
+  whenever VWAP sat inside the value area — which is most of the time.
+- The order book's last column was clipped on a fresh install. `Interactive` header mode
+  keeps every section at its ~100px default and `setStretchLastSection` only *grows* the
+  last one into spare room, so a narrow dock cut off `Vol`. Columns now share the viewport
+  until you drag one, after which your widths win.
+
+
 ## [2.0.0] - 2026-08-21
 
 Major, because three things break an existing setup: the `--grab` flag and the

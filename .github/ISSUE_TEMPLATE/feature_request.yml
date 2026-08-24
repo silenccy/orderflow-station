@@ -1,0 +1,31 @@
+name: Feature request
+description: Suggest a panel, an indicator, or a change in behaviour
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: >
+        Describe the trading or analysis problem, not just the feature. It is
+        often solvable with panels that already exist.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: evidence
+    attributes:
+      label: If this is an indicator or signal
+      description: >
+        The regime filter already in the project is unvalidated on IDX data, and
+        the README says so. Another unvalidated indicator is easy to add and hard
+        to remove.
+      options:
+        - label: I can describe how it would be evaluated on captured data

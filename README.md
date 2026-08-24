@@ -1,5 +1,10 @@
 # Orderflow Station
 
+[![tests](https://github.com/silenccy/orderflow-station/actions/workflows/ci.yml/badge.svg)](https://github.com/silenccy/orderflow-station/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/tag/silenccy/orderflow-station?label=release&color=3fe26a)](https://github.com/silenccy/orderflow-station/tags)
+[![python](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/downloads/)
+[![licence](https://img.shields.io/github/license/silenccy/orderflow-station?color=lightgrey)](LICENSE)
+
 An **orderflow trading terminal for Indonesian equities (IDX)** — footprint charts,
 a Bookmap-style liquidity heatmap, a DOM ladder and trade tape, built on live
 order-book and tick data from the Stockbit Pro market-data websocket.
@@ -352,6 +357,42 @@ Chart style (clusters vs candlesticks), imbalance and absorption thresholds, hea
 palette and contrast, DOM depth and columns all live in **⚙ Settings**.
 
 ## Architecture
+
+```mermaid
+flowchart LR
+    WS([" Stockbit Pro websocket "])
+    ARCH[("data/ archive<br/>book · trades · summary · gaps")]
+    LOCK{{"capture.lock heartbeat"}}
+    FEED["feed.py<br/>parse · reconnect · gap ledger"]
+    MODEL["model.py — no Qt<br/>footprint · CVD · profile · regime"]
+    PANELS["panels.py<br/>dockable panels"]
+    APP["app.py<br/>link groups A / B / C"]
+    BT["backtest.py<br/>walk-forward evaluation"]
+
+    WS -->|protobuf frames| FEED
+    ARCH -.->|replay| FEED
+    FEED -->|exactly one writer| ARCH
+    LOCK -.->|arbitrates| FEED
+    FEED -->|book · trade · summary · gap| MODEL
+    MODEL --> PANELS
+    PANELS --> APP
+    MODEL --> BT
+
+    class WS ext
+    class ARCH store
+    class LOCK lock
+    class FEED,MODEL,BT core
+    class PANELS,APP ui
+
+    classDef ext fill:#16202b,stroke:#5ad1ff,color:#e6edf3
+    classDef store fill:#16202b,stroke:#e6b450,color:#e6edf3
+    classDef lock fill:#2a1b1b,stroke:#ff9f43,color:#e6edf3
+    classDef core fill:#12203a,stroke:#3fe26a,color:#e6edf3
+    classDef ui fill:#241b33,stroke:#c792ea,color:#e6edf3
+```
+
+Live and replay emit the **same** event stream, so nothing downstream can tell them apart —
+which is what makes `--replay` a faithful rehearsal rather than a separate code path.
 
 ```
 orderflow/

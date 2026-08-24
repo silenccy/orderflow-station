@@ -1,0 +1,61 @@
+name: Bug report
+description: Something behaves differently from what the docs say
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ### ⚠️ Never paste a session frame
+
+        `data/subscribe_*.txt` embeds a **live JWT tied to your brokerage account**.
+        Anyone who reads it can use your market-data session until it expires.
+
+        Do not paste one here, and do not attach `capture_raw.jsonl`. If a log line
+        contains a long base64 blob, cut it out before posting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      placeholder: |
+        1. Launch with ...
+        2. Open the ... panel
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `--doctor`
+      description: >
+        Double-click `Diagnose.bat`, or run
+        `python -m orderflow.app --doctor`. This reports your Python, paths, Qt
+        platform, token state and recorder state. It never prints the token itself.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant lines from data/crash.log or data/launch.log
+      description: Leave blank if there are none.
+      render: text
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`python -m orderflow.app --version`"
+      placeholder: orderflow-station 2.0.0
+    validations:
+      required: true

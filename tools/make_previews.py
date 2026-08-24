@@ -169,7 +169,9 @@ def layout(win, left, right=None, weights=None, rweights=None, group="A"):
     if rweights and len(rp) > 1:
         win.resizeDocks(rp, rweights, Q.Orientation.Vertical)
     if lp and rp:
-        win.resizeDocks([lp[0], rp[0]], [66, 34], Q.Orientation.Horizontal)
+        # 60/40 rather than 66/34: the DOM ladder is five columns wide and got
+        # its last one clipped at the narrower split.
+        win.resizeDocks([lp[0], rp[0]], [60, 40], Q.Orientation.Horizontal)
     return lp + rp
 
 
@@ -180,7 +182,7 @@ def main():
               "BBCA": synth("BBCA", 9200, seed=29, drift=-0.03)}
 
     # 1. the whole workstation, default layout
-    win, _S = build(events, ["ASII", "BBCA"])
+    win, _S = build(events, ["ASII", "BBCA"], size=(1760, 980))
     shot(win, app, "preview.png", secs=10)
 
     # 2. orderflow core: footprint over its delta footer, profile beside it

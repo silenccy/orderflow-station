@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security or session-token concern
+    url: https://github.com/silenccy/orderflow-station/security/policy
+    about: Do not open a public issue. See the security policy.
+  - name: Protocol reference
+    url: https://github.com/silenccy/orderflow-station/blob/main/docs/protocol.md
+    about: Frame formats, units and the gotchas that cause wrong numbers.
