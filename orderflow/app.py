@@ -491,6 +491,12 @@ class MainWindow(QtWidgets.QMainWindow):
     #  Panels menu / roster
     # ------------------------------------------------------------------
     def add_panel(self, kind, group="A", spec=None, uid=None, area=None, show=True):
+        """Panels are docked as they are created, which is what lets
+        restoreState() find them by objectName later.
+
+        Do NOT add a second arrangement pass on top of this. Rearranging docks
+        that are already placed corrupts Qt's dock layout on a real (non-offscreen)
+        platform -- see _restore_panels."""
         cls = of_panels.PANEL_TYPES[kind]
         if uid is None:
             uid = self._next_uid
@@ -557,7 +563,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rg = mk("regime")
         self.dm = mk("dom")
         self.tp = mk("tape")
-        self._default_layout()
+        # deliberately no _default_layout() here: the caller arranges them once.
+        # Arranging twice re-places docks that are already placed, which is what
+        # aborts Qt on a real platform.
 
     def _default_layout(self):
         """Reproduce the original 4x2 arrangement with real docks."""
@@ -604,6 +612,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reset_layout(self):
         self.settings.remove("winstate")
         self._default_panels()
+        self._default_layout()
         self._rebuild_panels_menu()
         self.on_panel_source_changed()
 
@@ -662,9 +671,11 @@ class MainWindow(QtWidgets.QMainWindow):
         if not restored:
             self._default_layout()
         # safety net: a saved state where EVERY panel is hidden leaves a blank
-        # window with no way back, so fall back to the default arrangement
+        # window with no way back. Just reveal them -- re-running the arrangement
+        # here would move docks that are already placed, which aborts Qt.
         if self.panels and not any(p.isVisible() for p in self.panels):
-            self._default_layout()
+            for p in self.panels:
+                p.setVisible(True)
         self.toolbar.setVisible(True)             # never let a saved state hide it
         self._relink()
         self._sync_feeds()

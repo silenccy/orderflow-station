@@ -10,6 +10,21 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The app aborted on startup and never opened a window.** Startup ran the dock
+  arrangement *three* times -- once from `_default_panels`, once when `restoreState`
+  failed, and once from the all-hidden safety net. Rearranging docks that Qt has
+  already placed corrupts its dock layout, and on a real (non-offscreen) platform
+  roughly nine launches in ten died with `Fatal Python error: Aborted` or a
+  segfault inside whichever call did the moving. Startup now arranges once.
+
+  Every test suite passed throughout, because they all run under the offscreen Qt
+  platform, which never reproduces it. `tests/suites/layout_once.py` asserts the
+  invariant instead, and also guards the restore path: an intermediate fix created
+  the panels undocked, which silently made `restoreState` a no-op and left every
+  panel floating as its own top-level window.
+
 ### Added
 
 - README badges (CI, latest tag, Python, licence) and a Mermaid data-flow diagram of
