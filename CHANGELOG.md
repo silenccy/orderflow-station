@@ -10,6 +10,27 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **Aggressor side now comes from the exchange, not from inference.** Trade field 5
+  carries it directly: `1` buyer-initiated, `2` seller-initiated, absent for the
+  closing auction and negotiated blocks. `docs/protocol.md` previously described the
+  field as unresolved and unusable; measured over 8,138 BUMI prints it agrees with
+  the quote rule 94.7 % / 91.6 % of the time, and where they differ the exchange's
+  tag is the better source — the quote rule compares against a book whose two sides
+  arrive in separate frames and can be momentarily stale.
+
+  `model.aggressor()` prefers the tag and falls back to the existing
+  `model.classify()`; `diag()` gains `cls_flag` alongside `cls_quote`/`cls_tick`/
+  `cls_carry`, so `--debug` still shows how much of your delta is fact rather than
+  inference. Replaying the 2026-08-31 session: ASII 100 % from the tag, BUMI 91.4 %,
+  and the carry rule — pure guesswork — fired **not once**.
+
+  **This changes numbers on archives you have already captured.** Delta, CVD and
+  footprint imbalance for a previously recorded day will shift slightly when
+  replayed, because those trades are no longer inferred. The new values are the more
+  accurate ones, but an old screenshot will not match a fresh replay.
+
 ### Fixed
 
 - **The app aborted on startup and never opened a window.** Startup ran the dock

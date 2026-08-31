@@ -79,14 +79,34 @@ records in **field 1**; each record:
 | 4 | quantity (**shares**) |
 | 9 | trade id (used for dedup across reconnect backfill) |
 | 11 | value = price × qty |
-| 5 | a flag; meaning unresolved (does **not** reliably indicate aggressor side) |
+| 5 | **aggressor side**: `1` buyer-initiated, `2` seller-initiated, absent for non-continuous trading (see below) |
 
 Sizes seen: ~91 B for a live tick, ~3.6 KB for the reconnect backfill batch.
 
-**Aggressor side is not in the frame** — it is inferred client-side by the quote rule
-against the synced book, with a tick-rule fallback (Lee–Ready style); see
-`model.classify()`. Trades that arrive before the first book snapshot (the backfill)
-therefore classify by tick/carry only.
+**Aggressor side IS in the frame**, in field 5 — an earlier revision of these notes
+said it was not, and that it was unusable. Measured on a real session (2026-08-31,
+8,138 BUMI prints) against the quote rule:
+
+| field 5 | buy | sell | buy share |
+|---|---|---|---|
+| `1` | 2,651 | 148 | **94.7 %** |
+| `2` | 390 | 4,243 | **8.4 %** |
+| absent | 705 | 1 | closing auction + a 350,000-lot negotiated block |
+
+So `1` = buyer-initiated, `2` = seller-initiated. Where the tag and the quote rule
+disagree (~5–8 %) the tag is the better source: the quote rule compares against a
+book whose two sides arrive in **separate frames**, so the "synced" book can be a
+few milliseconds stale at exactly the moment an aggressive print lands.
+
+**An absent tag means non-continuous trading** — the closing auction (a burst of
+prints at 16:00:08) and negotiated block trades, where no aggressor is meaningful.
+Those fall through to the Lee–Ready inference like any other untagged print.
+
+`model.aggressor()` prefers the tag and falls back to `model.classify()`; `diag()`
+counts `cls_flag` / `cls_quote` / `cls_tick` / `cls_carry` so you can always see how
+much of your delta is recorded fact rather than inference. On that session the
+fallback handled only the 8.6 % of prints that carried no tag, and the carry rule —
+pure guesswork — fired **not once**.
 
 **Broker codes are not present** on this channel, despite Stockbit's UI showing them.
 

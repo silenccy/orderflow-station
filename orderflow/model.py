@@ -9,8 +9,10 @@ maintains everything the chart panels need:
   - VolumeAtPrice : price -> {buy, sell} volume (volume profile)
   - HeatmapBuffer : rolling [price x time] resting-size columns
 
-Trade classification is the quote rule vs the synced book at trade time, with a
-tick-rule fallback inside the spread (Lee-Ready style). Isolated in classify().
+Aggressor side comes from the exchange's own tag when it is present, and is
+inferred Lee-Ready style only when it is not (quote rule vs the synced book, tick
+rule inside the spread, carry on a zero tick). Both live in aggressor()/classify(),
+and diag() reports which source decided each trade.
 """
 
 import math
@@ -77,6 +79,36 @@ def classify(price, bid, ask, last_price, last_side):
         if price < last_price:
             return "sell"
     return last_side
+
+
+# The exchange's own aggressor tag, trade field 5. Measured against the quote rule
+# over 8,138 BUMI prints on 2026-08-31: flag 1 agreed on 94.7%, flag 2 on 91.6%.
+# Where they disagree the tag is likelier right -- the quote rule compares against
+# a book whose two sides arrive in separate frames, so it can be momentarily stale.
+FLAG_SIDE = {1: "buy", 2: "sell"}
+
+
+def aggressor(rec, bid, ask, last_price, last_side):
+    """(side, source) for one trade. Prefer what the exchange tells us; infer only
+    when it does not.
+
+    `source` is 'flag' when the tag decided it, otherwise the Lee-Ready rule that
+    fired ('quote' | 'tick' | 'carry'), so diag() can report how much of the delta
+    is recorded fact rather than inference.
+
+    A blank tag means non-continuous trading -- the closing auction and negotiated
+    blocks -- where there is no meaningful aggressor, so those fall through to the
+    inference like any other untagged print."""
+    side = FLAG_SIDE.get(rec.get("flag"))
+    if side is not None:
+        return side, "flag"
+    price = rec["price"]
+    side = classify(price, bid, ask, last_price, last_side)
+    if (ask is not None and price >= ask) or (bid is not None and price <= bid):
+        return side, "quote"
+    if last_price is not None and price != last_price:
+        return side, "tick"
+    return side, "carry"
 
 
 # ============================================================
@@ -205,8 +237,8 @@ class OrderflowModel:
         # --debug counters: catch buy/sell skew, book desync, dedup, heatmap runaway
         self._diag = {"book_frames": 0, "trade_frames": 0, "summary_frames": 0,
                       "dedup_skips": 0, "no_book": 0, "crossed_book": 0,
-                      "heatmap_trimmed": 0, "cls_quote": 0, "cls_tick": 0,
-                      "cls_carry": 0, "buys": 0, "sells": 0}
+                      "heatmap_trimmed": 0, "cls_flag": 0, "cls_quote": 0,
+                      "cls_tick": 0, "cls_carry": 0, "buys": 0, "sells": 0}
         self._spread_hist = Counter()    # spread value -> frames; for the distribution
 
     # ---- event intake ----
@@ -252,18 +284,12 @@ class OrderflowModel:
             self._seen_ids.add(tid)
         price, qty = rec["price"], rec["qty"]
         bid, ask = self.book.best_bid(), self.book.best_ask()
-        side = classify(price, bid, ask, self._last_price, self._last_side)
-        # mirror classify()'s decision to record which rule fired (before _last_price moves)
+        side, source = aggressor(rec, bid, ask, self._last_price, self._last_side)
         self._diag["trade_frames"] += 1
         self._diag["buys" if side == "buy" else "sells"] += 1
         if bid is None or ask is None:
             self._diag["no_book"] += 1
-        if (ask is not None and price >= ask) or (bid is not None and price <= bid):
-            self._diag["cls_quote"] += 1
-        elif self._last_price is not None and price != self._last_price:
-            self._diag["cls_tick"] += 1
-        else:
-            self._diag["cls_carry"] += 1
+        self._diag["cls_" + source] += 1     # flag | quote | tick | carry
         self._last_side, self._last_price = side, price
         ep = trade_epoch(rec) or 0.0
 
