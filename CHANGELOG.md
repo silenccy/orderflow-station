@@ -10,6 +10,18 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **Buy/sell colours are configurable** (Settings ▸ Footprint). Two pickers; the
+  imbalance fills and edge markers are *derived* from them, so the palette cannot end
+  up incoherent. Applies to the footprint clusters, candles and headers, and to the
+  volume profile. The DOM, tape, delta footer and watchlist keep their fixed green/red,
+  so a palette far from green/red will show a seam between them.
+- **The settings dialog was rebuilt**: sidebar navigation instead of tabs, a search box
+  (worth having at 50 settings), inline help on the 20 least obvious ones, live colour
+  swatches, and Reset page. `SETTINGS_SPEC` rows now take an optional 5th element for
+  that help text.
+
 ### Changed
 
 - **Aggressor side now comes from the exchange, not from inference.** Trade field 5
@@ -32,6 +44,14 @@ capability without breaking anything. **PATCH** is fixes only.
   accurate ones, but an old screenshot will not match a fresh replay.
 
 ### Fixed
+
+- The volume profile hardcoded its bar colours as raw RGB instead of using `BULL`/`BEAR`,
+  so it would have ignored any change to them. It now follows the configured palette.
+- `DARK_QSS` styled `QSpinBox`, which does not match `QDoubleSpinBox` — half the numeric
+  fields in the settings dialog were left unstyled. Now `QAbstractSpinBox`, and
+  `QPushButton` is styled too rather than staying light against the dark dialog.
+- Preview images shifted very slightly: the imbalance shades are now derived from the
+  buy/sell colours rather than being separate hand-tuned constants.
 
 - **The app aborted on startup and never opened a window.** Startup ran the dock
   arrangement *three* times -- once from `_default_panels`, once when `restoreState`

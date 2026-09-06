@@ -991,6 +991,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 val = min(max(val, spec[0]), spec[1])
             elif kind == "choice" and spec and val not in spec:
                 continue
+            elif kind == "color" and not QtGui.QColor(val).isValid():
+                continue                          # garbled hex -> keep the default
             self.cfg[k] = val
         if s.value("cell_mode") == "delta":
             self.delta_cells.setChecked(True)

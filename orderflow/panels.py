@@ -18,7 +18,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from . import model as of_model
 from .items import (BEAR, BULL, CommaAxis, DeltaFooterItem, DepthBarDelegate,
-                    FootprintItem, HeatmapCandleItem, SmoothImageItem)
+                    FootprintItem, HeatmapCandleItem, SmoothImageItem, side_colors)
 
 GROUPS = ["A", "B", "C"]
 GROUP_COLOR = {None: "#5f6b76", "A": "#ff5454", "B": "#5ad1ff", "C": "#3fe26a"}
@@ -539,11 +539,17 @@ class VapPanel(ChartPanel):
             buys = [r[1] for r in rows]
             sells = [r[2] for r in rows]
         nopen = pg.mkPen(None)                # no 1px outline on near-zero rows
+        # these used to be hardcoded RGB, so the profile silently ignored the
+        # buy/sell colours the footprint beside it was using
+        sc = side_colors(self.cfg)
+        buy_b, sell_b = QtGui.QColor(sc["buy"]), QtGui.QColor(sc["sell"])
+        buy_b.setAlpha(190)
+        sell_b.setAlpha(190)
         self.p.addItem(pg.BarGraphItem(x0=[-s for s in sells], y=ys, height=h,
-                                       width=sells, brush=pg.mkBrush(255, 84, 84, 190),
+                                       width=sells, brush=pg.mkBrush(sell_b),
                                        pen=nopen))
         self.p.addItem(pg.BarGraphItem(x0=0, y=ys, height=h, width=buys,
-                                       brush=pg.mkBrush(63, 226, 106, 190), pen=nopen))
+                                       brush=pg.mkBrush(buy_b), pen=nopen))
         ipoc = max(range(len(rows)), key=lambda i: rows[i][3])
         self.p.addItem(pg.BarGraphItem(x0=[-sells[ipoc]], y=[ys[ipoc]], height=h,
                                        width=[sells[ipoc] + buys[ipoc]],

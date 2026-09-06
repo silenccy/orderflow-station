@@ -35,10 +35,20 @@ QTableCornerButton::section { background: #12171a; border: 0; }
 QToolBar { background: #0e1114; border: 0; spacing: 2px; }
 QToolButton { color: #d8dde2; }
 QToolButton:hover { background: #1b2126; border-radius: 3px; }
-QComboBox, QSpinBox, QLineEdit {
+/* QAbstractSpinBox, not QSpinBox: the latter does not match QDoubleSpinBox, so
+   half the numeric fields in the settings dialog were left unstyled. */
+QComboBox, QAbstractSpinBox, QLineEdit {
     background: #12171a; color: #d8dde2;
     border: 1px solid #23282d; border-radius: 3px; padding: 1px 4px;
 }
+QPushButton {
+    background: #1b2229; color: #d8dde2;
+    border: 1px solid #2c343c; border-radius: 3px; padding: 4px 14px;
+}
+QPushButton:hover { background: #232c35; border-color: #3a444e; }
+QPushButton:pressed { background: #161c22; }
+QPushButton:default { border-color: #3f6ea8; }
+QPushButton:disabled { color: #5f6b76; border-color: #23282d; }
 QComboBox QAbstractItemView {
     background: #12171a; color: #d8dde2; selection-background-color: #1d2b3a;
 }
@@ -69,6 +79,29 @@ IMB_BUY_BG = QtGui.QColor(34, 150, 84)   # buy-imbalance cell fill (green)
 IMB_SELL_BG = QtGui.QColor(150, 46, 46)  # sell-imbalance bid-half tint (red)
 IMB_SELL_NUM = QtGui.QColor(245, 96, 96) # sell-imbalance number (red)
 CELL_NUM = QtGui.QColor(205, 214, 226)   # default cell numbers
+
+
+def side_colors(cfg):
+    """Buy/sell palette for the footprint and the volume profile.
+
+    Only the two base colours are configurable; the imbalance fill and edge
+    shades are DERIVED from them. Hand-tuned constants would stay green while a
+    user set the base to blue, which is exactly the incoherence this avoids.
+    The ratios are chosen to land near the original palette at the defaults."""
+    buy = QtGui.QColor(cfg.get("buy_color") or "#3fe26a")
+    sell = QtGui.QColor(cfg.get("sell_color") or "#ff5454")
+    if not buy.isValid():
+        buy = QtGui.QColor(BULL)
+    if not sell.isValid():
+        sell = QtGui.QColor(BEAR)
+    return {
+        "buy": buy,
+        "sell": sell,
+        "buy_fill": buy.darker(155),      # imbalance cell body
+        "sell_fill": sell.darker(175),
+        "buy_edge": buy.lighter(145),     # imbalance marker / number
+        "sell_edge": sell.lighter(115),
+    }
 CELL_DIV = QtGui.QColor(16, 26, 40)      # bid|ask divider
 HDR_DIM = QtGui.QColor(150, 162, 178)    # per-bar V / R-H / R-L header text
 ABSORB_SUP = QtGui.QColor(56, 230, 255)  # buy absorption at the low = support (cyan)
@@ -106,6 +139,7 @@ DEFAULTS = {
     "show_depth_bars": True,
     "tape_rows": 200, "time_ms": 3,
     "vap_scale": "sqrt", "vap_mode": "session", "live_hz": 7,
+    "buy_color": "#3fe26a", "sell_color": "#ff5454",
     "depth_levels": 30, "signal_rows": 300,
     "reconnect": True, "backoff_max": 30,
     "history": "today",
@@ -114,17 +148,27 @@ DEFAULTS = {
 # (tab, [(key, label, kind, spec)]) — kind: bool | int | double | choice
 SETTINGS_SPEC = [
     ("Footprint", [
+        ("buy_color", "Buy side colour", "color", None,
+         "Buyer-initiated volume, in the footprint clusters and the volume profile. "
+         "The imbalance shades are derived from it."),
+        ("sell_color", "Sell side colour", "color", None,
+         "Seller-initiated volume. The DOM, tape and delta footer keep their own "
+         "fixed green/red."),
         ("fp_style", "Chart style", "choice", ["clusters", "candles"]),
-        ("imb_ratio", "Imbalance ratio", "double", (1.0, 20.0, 0.5)),
-        ("imb_min_lots", "Imbalance min (lots)", "int", (0, 100000)),
+        ("imb_ratio", "Imbalance ratio", "double", (1.0, 20.0, 0.5),
+         "A cell is imbalanced when it beats the diagonally opposite cell by this multiple."),
+        ("imb_min_lots", "Imbalance min (lots)", "int", (0, 100000),
+         "Ignore imbalances on cells smaller than this, so thin prints stop lighting up."),
         ("va_coverage", "Value-area %", "int", (10, 95)),
         ("show_poc", "Highlight POC cell (gold)", "bool", None),
         ("show_candle", "Show mid candle (OHLC)", "bool", None),
         ("cell_gap", "Bid|ask gap (% of bar)", "int", (0, 30)),
         ("show_imbalance", "Show imbalance markers", "bool", None),
         ("show_absorption", "Show absorption (support/resist)", "bool", None),
-        ("absorption_min_lots", "Absorption min (lots)", "int", (0, 100000)),
-        ("absorption_ratio", "Absorption ratio", "double", (1.0, 20.0, 0.5)),
+        ("absorption_min_lots", "Absorption min (lots)", "int", (0, 100000),
+         "Floor for absorption, so a quiet bar's extreme does not qualify."),
+        ("absorption_ratio", "Absorption ratio", "double", (1.0, 20.0, 0.5),
+         "How much heavier than the bar's median a cell must be to count as absorption."),
         ("show_headers", "Show V / D / R headers", "bool", None),
         ("header_units", "Volume units (headers+cells)", "choice", ["lots", "shares"]),
         ("show_va_lines", "Show value-area lines", "bool", None),
@@ -137,11 +181,16 @@ SETTINGS_SPEC = [
     ]),
     ("Heatmap", [
         ("colormap", "Colormap", "choice", ["bookmap", "inferno", "viridis", "turbo", "magma"]),
-        ("hm_window", "Window (columns)", "int", (60, 10000)),
-        ("hm_throttle", "Throttle (s / column)", "double", (0.1, 10.0, 0.5)),
-        ("hm_scale", "Contrast scale", "choice", ["equalize", "sqrt", "linear", "log"]),
-        ("hm_gamma", "Equalize darkness (γ)", "double", (0.5, 6.0, 0.25)),
-        ("hm_pctile", "Clip percentile (non-equalize)", "int", (50, 100)),
+        ("hm_window", "Window (columns)", "int", (60, 10000),
+         "How many columns to keep. Older ones are dropped so a long session stays bounded."),
+        ("hm_throttle", "Throttle (s / column)", "double", (0.1, 10.0, 0.5),
+         "Seconds between heatmap columns. Rebuilds the model, so it is not instant."),
+        ("hm_scale", "Contrast scale", "choice", ["equalize", "sqrt", "linear", "log"],
+         "equalize ranks sizes so real walls stand out; the others map size directly."),
+        ("hm_gamma", "Equalize darkness (γ)", "double", (0.5, 6.0, 0.25),
+         "Only used by equalize. Higher pushes more of the range into the dark end."),
+        ("hm_pctile", "Clip percentile (non-equalize)", "int", (50, 100),
+         "Only used by the non-equalize scales: where to clip the brightest sizes."),
         ("show_price_line", "Show price line", "bool", None),
         ("show_walls", "Track biggest walls (lines)", "bool", None),
         ("show_hm_candles", "Overlay OHLC candles", "bool", None),
@@ -151,63 +200,175 @@ SETTINGS_SPEC = [
         ("bubble_opacity", "Bubble opacity", "int", (20, 255)),
     ]),
     ("DOM & Tape", [
-        ("dom_pro", "Pro mode (centered ladder)", "bool", None),
+        ("dom_pro", "Pro mode (centered ladder)", "bool", None,
+         "Centred ladder with Chg and per-level volume, versus the classic side-by-side book."),
         ("dom_resizable", "Resizable columns (drag headers)", "bool", None),
         ("dom_depth", "DOM depth (rows)", "int", (3, 60)),
-        ("wall_mult", "Wall × median", "double", (1.0, 20.0, 0.5)),
+        ("wall_mult", "Wall × median", "double", (1.0, 20.0, 0.5),
+         "A level counts as a wall at this multiple of the median resting size."),
         ("show_depth_bars", "Show depth bars", "bool", None),
         ("tape_rows", "Tape rows", "int", (10, 2000)),
-        ("time_ms", "Tape time decimals", "int", (0, 9)),
+        ("time_ms", "Tape time decimals", "int", (0, 9),
+         "Fractional-second digits in the tape's timestamps."),
     ]),
     ("Layout", [
         # panel visibility lives in the Panels menu now: dock state is the single
         # source of truth and persists in the QMainWindow saveState() blob
-        ("vap_scale", "Vol@price width scale", "choice", ["sqrt", "linear"]),
+        ("vap_scale", "Vol@price width scale", "choice", ["sqrt", "linear"],
+         "sqrt keeps a block print from flattening every other row; linear is raw volume."),
         ("vap_mode", "Vol@price range (new panels)", "choice", ["session", "visible"]),
         ("depth_levels", "Depth curve levels/side", "int", (5, 200)),
-        ("signal_rows", "Signal log rows", "int", (20, 2000)),
-        ("reconnect", "Reconnect when the feed drops", "bool", None),
-        ("backoff_max", "Max reconnect wait (s)", "int", (5, 300)),
-        ("live_hz", "Live redraw (Hz)", "int", (1, 30)),
+        ("signal_rows", "Signal log rows", "int", (20, 2000),
+         "Rows kept in the signal log and the capture-integrity panel."),
+        ("reconnect", "Reconnect when the feed drops", "bool", None,
+         "Retry automatically when the feed drops. Missed tape cannot be recovered."),
+        ("backoff_max", "Max reconnect wait (s)", "int", (5, 300),
+         "Longest wait between reconnect attempts. Retries back off up to this."),
+        ("live_hz", "Live redraw (Hz)", "int", (1, 30),
+         "Redraw rate while live. Lower it if the window feels heavy on a long session."),
     ]),
     ("General", [
-        ("history", "Live history preload (restart)", "choice", ["today", "all", "none"]),
+        ("history", "Live history preload (restart)", "choice", ["today", "all", "none"],
+         "How much of the archive to preload. Takes effect on the next launch."),
     ]),
 ]
 
 # key -> (kind, spec) for range-clamp / choice-validation on restore
-SPEC_BY_KEY = {key: (kind, spec)
-               for _tab, items in SETTINGS_SPEC for key, _label, kind, spec in items}
+# rows are (key, label, kind, spec) with an OPTIONAL 5th help string, so unpack
+# by index rather than by shape -- a fixed 4-tuple unpack breaks every setting at
+# once the moment one row gains help text
+SPEC_BY_KEY = {row[0]: (row[2], row[3])
+               for _tab, items in SETTINGS_SPEC for row in items}
+HELP_BY_KEY = {row[0]: (row[4] if len(row) > 4 else "")
+               for _tab, items in SETTINGS_SPEC for row in items}
 MODEL_CFG_KEYS = {"hm_throttle", "hm_window"}   # only these need a model rebuild to apply
 
 
+class ColorButton(QtWidgets.QPushButton):
+    """A swatch that opens a colour picker and shows what it currently holds."""
+
+    def __init__(self, value, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(58, 22)
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self._color = QtGui.QColor(value)
+        if not self._color.isValid():
+            self._color = QtGui.QColor("#3fe26a")
+        self._paint()
+        self.clicked.connect(self._pick)
+
+    def _paint(self):
+        c = self._color
+        # a light border on dark colours and vice versa, so the swatch never
+        # disappears into the dialog background
+        edge = "#0d1117" if c.lightness() > 128 else "#5f6b76"
+        self.setStyleSheet("background:%s; border:1px solid %s; border-radius:3px;"
+                           % (c.name(), edge))
+        self.setToolTip(c.name())
+
+    def _pick(self):
+        c = QtWidgets.QColorDialog.getColor(self._color, self, "Pick a colour")
+        if c.isValid():
+            self._color = c
+            self._paint()
+
+    def value(self):
+        return self._color.name()
+
+
 class SettingsDialog(QtWidgets.QDialog):
-    """Tabbed editor over a cfg dict. Calls `on_apply(new_values)` on Apply/OK."""
+    """Sidebar + search over a cfg dict. Calls `on_apply(new_values)` on Apply/OK."""
 
     def __init__(self, cfg, on_apply, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(360)
+        self.resize(720, 560)
         self._on_apply = on_apply
         self.widgets = {}
-        tabs = QtWidgets.QTabWidget()
+        self._rows = []          # (page_index, key, label, row_widgets) for the filter
+
+        self.nav = QtWidgets.QListWidget()
+        self.nav.setFixedWidth(150)
+        self.nav.setSpacing(1)
+        self.stack = QtWidgets.QStackedWidget()
+
         for tabname, items in SETTINGS_SPEC:
             page = QtWidgets.QWidget()
             form = QtWidgets.QFormLayout(page)
-            for key, label, kind, spec in items:
+            form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+            form.setVerticalSpacing(9)
+            idx = self.stack.count()
+            for row in items:
+                key, label, kind, spec = row[0], row[1], row[2], row[3]
+                help_text = row[4] if len(row) > 4 else ""
                 w = self._make(kind, spec, cfg.get(key, DEFAULTS[key]))
                 self.widgets[key] = (w, kind)
-                form.addRow(label, w)
-            tabs.addTab(page, tabname)
+                lab = QtWidgets.QLabel(label)
+                if help_text:
+                    holder = QtWidgets.QWidget()
+                    v = QtWidgets.QVBoxLayout(holder)
+                    v.setContentsMargins(0, 0, 0, 0)
+                    v.setSpacing(1)
+                    v.addWidget(w)
+                    hint = QtWidgets.QLabel(help_text)
+                    hint.setWordWrap(True)
+                    hint.setStyleSheet("color:#7f8792; font-size:11px;")
+                    v.addWidget(hint)
+                    field = holder
+                else:
+                    field = w
+                form.addRow(lab, field)
+                self._rows.append((idx, key, label.lower(), lab, field))
+            page_scroll = QtWidgets.QScrollArea()
+            page_scroll.setWidgetResizable(True)
+            page_scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+            page_scroll.setWidget(page)
+            self.stack.addWidget(page_scroll)
+            self.nav.addItem(tabname)
+        self.nav.setCurrentRow(0)
+        self.nav.currentRowChanged.connect(self.stack.setCurrentIndex)
+
+        self.search = QtWidgets.QLineEdit()
+        self.search.setPlaceholderText("Search settings...")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._filter)
+
         B = QtWidgets.QDialogButtonBox
         btns = B(B.StandardButton.Ok | B.StandardButton.Apply | B.StandardButton.Cancel)
+        reset = btns.addButton("Reset page", B.ButtonRole.ResetRole)
+        reset.setToolTip("Restore every setting on this page to its default")
+        reset.clicked.connect(self._reset_page)
         btns.accepted.connect(self._ok)        # OK = apply once, then close
-        btns.rejected.connect(self.reject)     # Cancel discards (values only read on _apply)
+        btns.rejected.connect(self.reject)     # Cancel discards (values read on _apply)
         btns.button(B.StandardButton.Apply).clicked.connect(self._apply)
-        lay = QtWidgets.QVBoxLayout(self)
-        lay.addWidget(tabs)
-        lay.addWidget(btns)
 
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(self.search, 0, 0, 1, 2)
+        grid.addWidget(self.nav, 1, 0)
+        grid.addWidget(self.stack, 1, 1)
+        grid.addWidget(btns, 2, 0, 1, 2)
+        grid.setColumnStretch(1, 1)
+
+    # ---- filtering ----
+    def _filter(self, text):
+        q = (text or "").strip().lower()
+        hits = {}
+        for idx, key, label, lab, field in self._rows:
+            show = (not q) or q in label or q in key.replace("_", " ")
+            lab.setVisible(show)
+            field.setVisible(show)
+            hits[idx] = hits.get(idx, 0) + (1 if show else 0)
+        for i in range(self.nav.count()):
+            it = self.nav.item(i)
+            empty = q and not hits.get(i)
+            it.setForeground(QtGui.QColor("#4c545c") if empty else QtGui.QColor("#d8dee4"))
+        if q:                                  # jump to the first page with a match
+            for i in range(self.nav.count()):
+                if hits.get(i):
+                    self.nav.setCurrentRow(i)
+                    break
+
+    # ---- widget factory ----
     @staticmethod
     def _make(kind, spec, val):
         if kind == "bool":
@@ -217,9 +378,22 @@ class SettingsDialog(QtWidgets.QDialog):
         elif kind == "double":
             w = QtWidgets.QDoubleSpinBox()
             w.setRange(spec[0], spec[1]); w.setSingleStep(spec[2]); w.setValue(float(val))
+        elif kind == "color":
+            w = ColorButton(val)
         else:
             w = QtWidgets.QComboBox(); w.addItems(spec); w.setCurrentText(str(val))
         return w
+
+    @staticmethod
+    def _set(w, kind, val):
+        if kind == "bool":
+            w.setChecked(bool(val))
+        elif kind in ("int", "double"):
+            w.setValue(type(w.value())(val))
+        elif kind == "color":
+            w._color = QtGui.QColor(val); w._paint()
+        else:
+            w.setCurrentText(str(val))
 
     def values(self):
         out = {}
@@ -228,9 +402,19 @@ class SettingsDialog(QtWidgets.QDialog):
                 out[key] = w.isChecked()
             elif kind in ("int", "double"):
                 out[key] = w.value()
+            elif kind == "color":
+                out[key] = w.value()
             else:
                 out[key] = w.currentText()
         return out
+
+    def _reset_page(self):
+        page = self.nav.currentRow()
+        for _tab, items in [SETTINGS_SPEC[page]]:
+            for row in items:
+                key, kind = row[0], row[2]
+                w, _k = self.widgets[key]
+                self._set(w, kind, DEFAULTS[key])
 
     def _apply(self):
         self._on_apply(self.values())
@@ -317,6 +501,7 @@ class FootprintItem(pg.GraphicsObject):
         gdelta = max((abs(c[3]) for c in all_cells), default=1) or 1
         delta_mode = self.cell_mode == "delta"
         cfg = self.cfg
+        sc = side_colors(cfg)               # configurable buy/sell + derived shades
         imb_ratio = cfg["imb_ratio"]
         imb_min = cfg["imb_min_lots"] * 100
         show_imb = cfg["show_imbalance"]
@@ -350,7 +535,7 @@ class FootprintItem(pg.GraphicsObject):
 
                 is_poc = show_poc and price == poc
                 if delta_mode:                                   # signed-|delta| heat
-                    col = QtGui.QColor(BULL if delta >= 0 else BEAR)
+                    col = QtGui.QColor(sc["buy"] if delta >= 0 else sc["sell"])
                     col.setAlpha(40 + int(195 * min(abs(delta) / gdelta, 1.0)))
                     p.fillRect(QtCore.QRectF(xi + 0.04, y, 0.92, tick), col)
                 else:                                            # Quantower bid|ask
@@ -364,10 +549,10 @@ class FootprintItem(pg.GraphicsObject):
                     else:
                         lcol = rcol = base
                         if sell_imb:
-                            lcol = QtGui.QColor(IMB_SELL_BG)
+                            lcol = QtGui.QColor(sc["sell_fill"])
                             lcol.setAlpha(110 + int(90 * min(total / ref, 1.0)))
                         if buy_imb:
-                            rcol = QtGui.QColor(IMB_BUY_BG)
+                            rcol = QtGui.QColor(sc["buy_fill"])
                             rcol.setAlpha(150 + int(95 * min(total / ref, 1.0)))
                     p.fillRect(QtCore.QRectF(xi + 0.03, y, 0.47 - gap / 2, tick), lcol)
                     p.fillRect(QtCore.QRectF(xi + 0.5 + gap / 2, y, 0.47 - gap / 2, tick), rcol)
@@ -386,7 +571,7 @@ class FootprintItem(pg.GraphicsObject):
                 meta = model.bar_meta.get(bar)
                 if meta and meta.get("o") is not None:
                     o, cl = meta["o"], meta["c"]
-                    col = QtGui.QColor(BULL if cl >= o else BEAR)
+                    col = QtGui.QColor(sc["buy"] if cl >= o else sc["sell"])
                     p.setPen(QtGui.QPen(col, 0))
                     p.drawLine(QtCore.QPointF(xi + 0.5, lo),      # wick spans the traded range
                                QtCore.QPointF(xi + 0.5, hi))
@@ -446,12 +631,12 @@ class FootprintItem(pg.GraphicsObject):
             xg1 = tr.map(QtCore.QPointF(xi + 0.5 + gap / 2, price)).x()
             p.setFont(boldf if sell_imb else font)
             p.setPen(QtGui.QPen(poc_num if is_poc
-                                else IMB_SELL_NUM if sell_imb else CELL_NUM))
+                                else sc["sell_edge"] if sell_imb else CELL_NUM))
             p.drawText(QtCore.QRectF(x0 + 2, ytop, xg0 - x0 - 4, hpx), A_R,
                        f"{sell / unit:,.0f}")
             p.setFont(boldf if buy_imb else font)
             p.setPen(QtGui.QPen(poc_num if is_poc
-                                else QtGui.QColor(235, 242, 248) if buy_imb else CELL_NUM))
+                                else sc["buy_edge"] if buy_imb else CELL_NUM))
             p.drawText(QtCore.QRectF(xg1 + 2, ytop, x1 - xg1 - 4, hpx), A_L,
                        f"{buy / unit:,.0f}")
 
@@ -467,7 +652,7 @@ class FootprintItem(pg.GraphicsObject):
                 htop = tr.map(QtCore.QPointF(xi + 0.5, hi + tick / 2)).y()
                 p.setPen(QtGui.QPen(HDR_DIM))
                 p.drawText(QtCore.QRectF(xL, htop - 42, wpx, 13), A_C, f"V {V / unit:,.0f}")
-                p.setPen(QtGui.QPen(BULL if D >= 0 else BEAR))
+                p.setPen(QtGui.QPen(sc["buy"] if D >= 0 else sc["sell"]))
                 p.drawText(QtCore.QRectF(xL, htop - 29, wpx, 13), A_C, f"D {D / unit:+,.0f}")
                 p.setPen(QtGui.QPen(HDR_DIM))
                 p.drawText(QtCore.QRectF(xL, htop - 16, wpx, 13), A_C, f"R/H {_fmt_ratio(r_h)}")
