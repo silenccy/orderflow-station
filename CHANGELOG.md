@@ -10,6 +10,14 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-06
+
+Major, because two things break an existing setup: `orderflow.items` no longer exists —
+it was split into `theme`, `settings` and `chart_items`, so any import of it fails — and
+aggressor side now comes from the exchange's own tag rather than inference, which changes
+delta, CVD and imbalance numbers when you replay an archive captured before this.
+
+
 ### Changed
 
 - **`items.py` is gone, split into three modules that say what they hold.** It was 847
@@ -222,6 +230,7 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/silenccy/orderflow-station/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/silenccy/orderflow-station/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/silenccy/orderflow-station/releases/tag/v1.0.0
