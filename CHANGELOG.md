@@ -10,6 +10,25 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`vap_mode` was a control that did nothing.** It sat in the dialog labelled
+  "Vol@price range (new panels)" while no code read it, so choosing `visible` changed
+  nothing. New profile panels now honour it; a restored panel still keeps whatever mode
+  it was left in.
+
+### Added
+
+- **Help text on 47 of 55 settings** (was 25). The 8 without it are `show_*` toggles
+  whose labels already say what they do.
+- `tests/suites/settings_complete.py` makes the settings surface self-policing: no
+  duplicate rows, nothing in `DEFAULTS` that the dialog cannot reach, nothing in the
+  dialog missing a default (which would raise `KeyError` the moment it opened), no
+  setting that nothing reads, no `cfg[...]` read without a default, every numeric
+  default inside its own declared range, and every choice default actually one of the
+  choices. That last pair would otherwise fail only when a user happened to open the
+  page.
+
 ### Added
 
 - **Order-size analytics from the book's order count.** Every level carries `freq`, the

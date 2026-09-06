@@ -474,6 +474,9 @@ class VapPanel(ChartPanel):
     def title_extras(self):
         self.mode = QtWidgets.QComboBox()
         self.mode.addItems(["session", "visible"])
+        # seed from the setting; apply_state() overrides it for a restored panel,
+        # which is right -- a saved panel keeps whatever mode it was left in
+        self.mode.setCurrentText(self.cfg.get("vap_mode", "session"))
         self.mode.setFixedWidth(78)
         self.mode.setToolTip("session = whole day.  visible = only the bars in view\n"
                              "on the linked footprint, so POC/VA follow your zoom.")
