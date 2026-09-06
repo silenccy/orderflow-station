@@ -226,6 +226,12 @@ class OrderflowModel:
         self.heatmap = []       # [(epoch, {price: value}, mid_price), ...]
         self.trades = []        # raw trade records (for the tape)
         self.gaps = []          # recorded holes in the tape (see feed.gap_record)
+        # order-size analytics: shares traded at each price since that side's last
+        # book snapshot, and the reload evidence that falls out of comparing the
+        # two. Thresholds are applied at DISPLAY time (see reload_rows) so tuning
+        # them never needs a model rebuild.
+        self._consumed = Counter()
+        self.reloads = {}       # price -> {count, shares, consumed, freq_delta, last}
         self.summary = None     # latest session OHLC/turnover dict
         self._cvd = 0.0
         self._last_price = None
@@ -253,8 +259,44 @@ class OrderflowModel:
         elif ev[0] == "gap":
             self.gaps.append(ev[1])
 
+    def _detect_reloads(self, side, levels, ep):
+        """Compare the incoming side against the state it is about to replace.
+
+        A level that was hit and topped back up inside one snapshot shows NO net
+        change, so "did it grow?" is the wrong test. Measure against what should
+        have been left instead:
+
+            expected = old_value - consumed_by_trades
+            reload   = new_value - expected
+
+        The order count decides what a reload means: roughly unchanged implies one
+        order reloading, a jump implies new participants arriving. Without order
+        ids neither can be proven -- this is evidence, not fact."""
+        old_val = self.book.asks if side == "OFFER" else self.book.bids
+        old_frq = self.book.ask_freq if side == "OFFER" else self.book.bid_freq
+        for price, freq, value in levels:
+            consumed = self._consumed.pop(price, 0.0)
+            if consumed <= 0 or price not in old_val:
+                continue
+            expected = old_val[price] - consumed
+            refill = value - expected
+            if refill <= 0:
+                continue                      # ordinary consumption, nothing added back
+            e = self.reloads.get(price)
+            if e is None:
+                e = self.reloads[price] = {"count": 0, "shares": 0.0,
+                                           "consumed": 0.0, "freq_delta": 0,
+                                           "first": ep, "last": ep}
+            e["count"] += 1
+            e["shares"] += refill
+            e["consumed"] += consumed
+            e["freq_delta"] += freq - old_frq.get(price, freq)
+            e["last"] = ep
+
     def _on_book(self, ev):
         _, _sym, side, levels, ts = ev
+        ep_book = _parse_iso_epoch(ts) or 0.0
+        self._detect_reloads(side, levels, ep_book)   # BEFORE the state is replaced
         self.book.update(side, levels)
         self._diag["book_frames"] += 1
         bb, ba = self.book.best_bid(), self.book.best_ask()
@@ -265,7 +307,7 @@ class OrderflowModel:
                 self._diag["crossed_book"] += 1
             else:
                 self._spread_hist[ba - bb] += 1   # real (positive) spread only
-        ep = _parse_iso_epoch(ts) or 0.0
+        ep = ep_book
         if (self._heatmap_every <= 0 or self._last_heatmap_t is None
                 or ep - self._last_heatmap_t >= self._heatmap_every):
             mid = (bb + ba) / 2 if (bb is not None and ba is not None) else self._last_price
@@ -312,6 +354,7 @@ class OrderflowModel:
         vp = self.vap.setdefault(price, {"buy": 0.0, "sell": 0.0})
         vp[side] += qty
 
+        self._consumed[price] += qty      # for reload detection on the next snapshot
         self._cvd += qty if side == "buy" else -qty
         self.cvd_x.append(ep)
         self.cvd_y.append(self._cvd)
@@ -447,6 +490,62 @@ class OrderflowModel:
                 lost += hi - lo
         return (max(0.0, span - lost) / span, lost, span)
 
+    def order_size_rows(self, depth=20):
+        """[(price, side, avg_lots, freq, lots)] around the touch.
+
+        avg = value / freq: the average size of ONE resting order at that price.
+        A level holding 4,000 lots across 8 orders is a different animal from the
+        same 4,000 across 400, and depth alone cannot tell them apart."""
+        b = self.book
+        out = []
+        for price, _bf, bv, _af, av in self.ladder(depth):
+            for value, freq, side in ((bv, b.bid_freq.get(price), "bid"),
+                                      (av, b.ask_freq.get(price), "ask")):
+                if not value:
+                    continue
+                lots = value / 100.0
+                avg = (value / freq / 100.0) if freq else lots   # freq 0 -> treat as one
+                out.append((price, side, avg, freq or 0, lots))
+        return out
+
+    def reload_rows(self, min_frac=0.5, freq_tol=3, min_count=2, window_sec=300):
+        """Levels being topped back up after trades eat into them: replenished
+        (hidden) liquidity, as [(price, count, lots, per_min, last_ep)].
+
+        `min_frac`   the reload must be at least this share of what was consumed
+        `freq_tol`   average order-count increase still consistent with ONE order
+                     reloading rather than a crowd arriving
+        `min_count`  how many times before it is worth showing
+        `window_sec` only levels active this recently; 0 for the whole session
+
+        Reported as a RATE as well as a total, because a cumulative count over a
+        session is nearly tautological for a stock trading in a few ticks -- every
+        traded price gets refilled eventually. Replenishment per minute is what
+        separates a level being actively worked from one that merely existed.
+
+        Filtering happens here, not during detection, so changing the thresholds
+        never requires rebuilding the model.
+
+        HEURISTIC, not proof: the feed is level-aggregated with no order ids, so
+        one order reloading and one order leaving while a similar one arrives are
+        indistinguishable."""
+        now = max((e["last"] for e in self.reloads.values()), default=0.0)
+        out = []
+        for price, e in self.reloads.items():
+            if e["count"] < min_count or e["consumed"] <= 0:
+                continue
+            if window_sec and now - e["last"] > window_sec:
+                continue
+            if e["shares"] < min_frac * e["consumed"]:
+                continue
+            if e["freq_delta"] / max(e["count"], 1) > freq_tol:
+                continue                       # order count climbed: a crowd, not a reload
+            span_min = max((e["last"] - e["first"]) / 60.0, 1 / 60.0)
+            out.append((price, e["count"], e["shares"] / 100.0,
+                        e["count"] / span_min, e["last"]))
+        out.sort(key=lambda r: -r[3])          # busiest first
+        return out
+
     def diag(self):
         """Diagnostics snapshot for the --debug readout: raw counters plus derived
         health (buy %, spread, heatmap depth, and the footprint==VAP invariant —
@@ -467,6 +566,7 @@ class OrderflowModel:
         d["spread_p90"] = _weighted_pct(self._spread_hist, 90)
         d["spread_mode"] = (self._spread_hist.most_common(1)[0][0]
                             if self._spread_hist else None)
+        d["reloads"] = len(self.reload_rows())
         d["gaps"] = len(self.gaps)
         cov = self.coverage()
         d["coverage"] = None if cov is None else 100.0 * cov[0]

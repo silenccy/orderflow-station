@@ -140,6 +140,8 @@ DEFAULTS = {
     "tape_rows": 200, "time_ms": 3,
     "vap_scale": "sqrt", "vap_mode": "session", "live_hz": 7,
     "buy_color": "#3fe26a", "sell_color": "#ff5454",
+    "show_avg_size": True, "avg_size_mult": 3.0, "reload_min_frac": 0.5,
+    "reload_freq_tol": 3, "reload_min_count": 3,
     "depth_levels": 30, "signal_rows": 300,
     "reconnect": True, "backoff_max": 30,
     "history": "today",
@@ -200,6 +202,19 @@ SETTINGS_SPEC = [
         ("bubble_opacity", "Bubble opacity", "int", (20, 255)),
     ]),
     ("DOM & Tape", [
+        ("show_avg_size", "Show average order size", "bool", None,
+         "value / order-count per level: one large order versus a crowd of small "
+         "ones at the same price. Depth alone cannot tell them apart."),
+        ("avg_size_mult", "Big-order highlight (x median)", "double", (1.0, 20.0, 0.5),
+         "Emphasise a level whose average order is this many times the ladder median."),
+        ("reload_min_frac", "Reload min share of consumed", "double", (0.1, 2.0, 0.1),
+         "A level counts as replenished when it is topped back up by at least this "
+         "share of what trades just took."),
+        ("reload_freq_tol", "Reload order-count tolerance", "int", (0, 50),
+         "How much the order count may rise and still look like ONE order reloading "
+         "rather than new participants arriving."),
+        ("reload_min_count", "Reload min occurrences", "int", (1, 100),
+         "How many times a level must replenish before it is marked."),
         ("dom_pro", "Pro mode (centered ladder)", "bool", None,
          "Centred ladder with Chg and per-level volume, versus the classic side-by-side book."),
         ("dom_resizable", "Resizable columns (drag headers)", "bool", None),

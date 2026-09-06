@@ -12,6 +12,30 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ### Added
 
+- **Order-size analytics from the book's order count.** Every level carries `freq`, the
+  number of resting orders, which the terminal previously used only to fill two columns
+  in the classic DOM. The pro DOM now has an **Avg** column showing `value / freq` — the
+  average size of one resting order — highlighted when a level is held by unusually few,
+  large orders. On the 2026-08-31 capture that ranged 7 → 82 lots across ASII levels and
+  up to 49,354 on BUMI: a level averaging 49,354 lots and one averaging 356 are utterly
+  different things the terminal used to render identically.
+- **Replenishment (hidden-liquidity) detection.** Levels topped back up after trades eat
+  into them are marked `↻`, with the count, lots put back and rate in the tooltip, and a
+  count in the Σ footer. The test is not "the level got bigger" — book snapshots arrive
+  about once a second, so a level hit and refilled within that second shows no net change
+  at all. It compares against `old_value - consumed_by_trades`, which catches exactly that
+  case. The order count then separates one order reloading from a crowd arriving.
+
+  Reported as a **rate**, not just a session total: on a stock trading in four ticks a
+  cumulative count is nearly tautological, since every traded price gets refilled
+  eventually.
+
+  **Heuristic, not proof** — and labelled as such in the UI. The feed is level-aggregated
+  with no order ids, so one order reloading is indistinguishable from one leaving while a
+  similar one arrives.
+
+### Added
+
 - **Buy/sell colours are configurable** (Settings ▸ Footprint). Two pickers; the
   imbalance fills and edge markers are *derived* from them, so the palette cannot end
   up incoherent. Applies to the footprint clusters, candles and headers, and to the

@@ -53,6 +53,12 @@ A protobuf wrapper around a **pipe-delimited ASCII** payload:
 - Each level is `price;freq;value`:
   - `price` — price level (IDR)
   - `freq` — **number of resting orders** at that level (rarely exposed by a retail feed)
+    and genuinely useful rather than trivia. `value / freq` is the average size of one
+    resting order, which separates a single institutional order from a retail crowd at
+    the same price: measured on 2026-08-31 that ranged 7 → 82 lots across ASII levels
+    (a 12x spread) and up to 49,354 lots on BUMI. It also decides what a replenished
+    level means — order count roughly unchanged suggests one order reloading, a jump
+    means new participants arrived. See `model.order_size_rows` / `model.reload_rows`.
   - `value` — **total shares** resting. **lots = value / 100.**
 - ~60 levels per side (not the 5-level public cap).
 - Trailer holds an update id, a total, and two nanosecond ISO timestamps (event +

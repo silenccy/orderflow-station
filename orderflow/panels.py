@@ -893,8 +893,8 @@ class DomPanel(Panel):
         for col in range(6):
             self.dom.setItemDelegateForColumn(col, None)
         if pro:
-            self.dom.setColumnCount(5)
-            self.dom.setHorizontalHeaderLabels(["Bid", "Price", "Ask", "Chg", "Vol"])
+            self.dom.setColumnCount(6)
+            self.dom.setHorizontalHeaderLabels(["Bid", "Price", "Ask", "Chg", "Vol", "Avg"])
             self.dom.setItemDelegateForColumn(0, self._del_bid)
             self.dom.setItemDelegateForColumn(2, self._del_ask)
         else:
@@ -973,6 +973,11 @@ class DomPanel(Panel):
         maxlot = self._smooth("_dom_max", lots[-1] if lots else 1)
         wall = c["wall_mult"] * self._smooth("_dom_med", lots[len(lots) // 2] if lots else 0)
         show_bars = c["show_depth_bars"]
+        sizes = sorted(a for _p, _s, a, _f, _l in m.order_size_rows(c["dom_depth"]) if a)
+        avg_med = self._smooth("_dom_avg_med", sizes[len(sizes) // 2] if sizes else 0)
+        reloads = {r[0]: (r[1], r[2], r[3]) for r in m.reload_rows(
+            min_frac=c["reload_min_frac"], freq_tol=c["reload_freq_tol"],
+            min_count=c["reload_min_count"])} if c["show_avg_size"] else {}
 
         ctr = QtCore.Qt.AlignmentFlag.AlignCenter
         rgt = QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
@@ -1021,6 +1026,28 @@ class DomPanel(Panel):
             vt.setTextAlignment(rgt)
             vt.setForeground(DIMV)
             self.dom.setItem(r, 4, vt)
+
+            # Avg: mean size of ONE resting order here. Two levels showing the same
+            # depth are different animals if one is 8 orders and the other is 400.
+            freq = (m.book.ask_freq if is_ask else m.book.bid_freq).get(price) or 0
+            lot = (av if is_ask else bv) or 0
+            avg = (lot / freq / 100) if freq else 0
+            at = QtWidgets.QTableWidgetItem(format(avg, ",.0f") if avg else "")
+            at.setTextAlignment(rgt)
+            if avg and avg_med and avg >= c["avg_size_mult"] * avg_med:
+                at.setForeground(QtGui.QColor("#e6b450"))   # few, large orders
+                at.setFont(bold)
+            else:
+                at.setForeground(DIMV)
+            rl = reloads.get(price)
+            if rl:
+                at.setText((at.text() + "  ↻").strip())
+                at.setToolTip("Replenished %d times, %s lots put back after trades took "
+                              "size out (%.1f/min).\nInferred from level totals — the "
+                              "feed carries no order ids, so this cannot be confirmed as "
+                              "one order reloading."
+                              % (rl[0], format(rl[1], ",.0f"), rl[2]))
+            self.dom.setItem(r, 5, at)
         self._dom_prev = cur
 
         tb, ta = sum(blots), sum(alots)
@@ -1033,8 +1060,9 @@ class DomPanel(Panel):
             "<span style='color:#5f6b76'> / </span>"
             "<span style='color:#ff5454;font-weight:600'>A %s</span>"
             "<span style='color:#5f6b76'> lots &nbsp;&middot;&nbsp; %.0f%% bid "
-            "&nbsp;&middot;&nbsp; vol %s</span>"
-            % (format(tb, ",.0f"), format(ta, ",.0f"), bid_pct, format(tv, ",.0f")))
+            "&nbsp;&middot;&nbsp; vol %s%s</span>"
+            % (format(tb, ",.0f"), format(ta, ",.0f"), bid_pct, format(tv, ",.0f"),
+               ("  &middot;  %d replenishing" % len(reloads)) if reloads else ""))
 
         last = m.trades[-1]["price"] if m.trades else None
         if last is not None and spread is not None:
