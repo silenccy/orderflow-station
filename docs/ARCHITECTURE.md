@@ -223,7 +223,8 @@ forward efficiency and 1–2 tick moves. `TREND↑` fired twice in six days. Tre
 ## 5. GUI (`app.py`)
 
 > Describes the **upstream** single-window build. Locally this is now split across
-> `items.py` / `panels.py` / `app.py` and every panel is a dock — see §9.
+> `theme.py` / `settings.py` / `chart_items.py` / `panels.py` / `app.py` and every
+> panel is a dock — see §9.
 
 Nine classes. Five are custom `pg.GraphicsObject` / `ImageItem` / `QStyledItemDelegate`
 painters — this is hand-rolled rendering, not stock pyqtgraph plots.
@@ -401,7 +402,9 @@ hours.
 
 | module | role |
 |---|---|
-| `items.py` | colours, `DEFAULTS`/`SETTINGS_SPEC`, `SettingsDialog`, and the pyqtgraph drawing primitives — extracted verbatim, no logic change |
+| `theme.py` | colours and the dark stylesheet |
+| `settings.py` | `DEFAULTS`, `SETTINGS_SPEC` and `SettingsDialog` |
+| `chart_items.py` | the pyqtgraph drawing primitives |
 | `panels.py` | `Panel(QDockWidget)` base + 11 panel classes; the old `MainWindow._refresh_*` bodies moved onto the panel that owns them |
 | `app.py` | window: model registry, link groups, feed threads, Panels menu, persistence |
 

@@ -400,7 +400,11 @@ orderflow/
   feed.py      websocket protocol, frame parsing, CSV persistence, live + replay feeds
   model.py     pure aggregation, NO Qt — footprint, CVD, volume profile, book, heatmap,
                trade classification, regime filter
-  items.py     colours, tunable settings + the pyqtgraph drawing primitives
+  theme.py     colours and the dark stylesheet — "what colour is a buy?"
+  settings.py  every tunable value + the dialog that edits them (SETTINGS_SPEC is the
+               single source of truth: add a row and the setting appears)
+  chart_items.py  the pyqtgraph primitives that paint the charts (footprint clusters,
+               delta bars, heatmap candles, DOM depth bars)
   panels.py    every widget as a dockable Panel (footprint, heatmap, DOM, watchlist, ...)
   app.py       PySide6/pyqtgraph window: model registry, link groups, live feed threads
   startup.py   the dialogs that replace the CLI (Start, Get token, command reference)
@@ -508,10 +512,11 @@ git push origin vX.Y.Z
 
 - Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
 - `python -m compileall -q orderflow tools tests` — quick syntax gate.
-- The GUI is three modules: `items.py` (colours, settings spec, pyqtgraph drawing
-  primitives), `panels.py` (every widget as a `QDockWidget` subclass) and `app.py`
-  (window, model registry, link groups, feed threads). Adding a widget means one class in
-  `panels.py` with a `@register` decorator and one line in `app.py`'s `PANEL_MENU`.
+- The GUI is layered so each file answers one question: `theme.py` *what colour is
+  this?*, `settings.py` *what can the user change?*, `chart_items.py` *how is it
+  painted?*, `panels.py` *what widgets exist?*, `app.py` *how do they fit together?*
+  Adding a widget means one class in `panels.py` with a `@register` decorator and one
+  line in `app.py`'s `PANEL_MENU`.
 - The GUI renders headless for verification: `python -m orderflow.app --replay --shot out.png`.
 - `tools/decode_frame.py` dumps an unknown protobuf frame's field structure — the tool
   used to decode the trade format.

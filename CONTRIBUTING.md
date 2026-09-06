@@ -53,8 +53,8 @@ than `CTRL_C_EVENT`/`CTRL_BREAK_EVENT` terminates the target, so "is it alive?" 
 the recorder it was asking about.
 
 **The model layer imports no Qt.** `feed → model` must stay usable headless; that is what
-lets the backtest and the recorder run without a GUI. Keep rendering in `panels.py` and
-`items.py`.
+lets the backtest and the recorder run without a GUI. Keep rendering in `panels.py`
+and `chart_items.py`.
 
 ## Adding a panel
 

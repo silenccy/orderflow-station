@@ -46,8 +46,9 @@ from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
 from . import capture as of_capture  # noqa: E402
 from . import panels as of_panels  # noqa: E402
 from . import startup as of_startup  # noqa: E402
-from .items import (BEAR, BULL, DARK_QSS, DEFAULTS,  # noqa: E402
-                    MODEL_CFG_KEYS, SPEC_BY_KEY, SettingsDialog)
+from .settings import (DEFAULTS, MODEL_CFG_KEYS, SPEC_BY_KEY,  # noqa: E402
+                        SettingsDialog)
+from .theme import BEAR, BULL, DARK_QSS  # noqa: E402
 
 def _daemon_exe():
     """pythonw.exe when we can find it, so the detached recorder never flashes

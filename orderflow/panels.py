@@ -17,8 +17,9 @@ import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from . import model as of_model
-from .items import (BEAR, BULL, CommaAxis, DeltaFooterItem, DepthBarDelegate,
-                    FootprintItem, HeatmapCandleItem, SmoothImageItem, side_colors)
+from .chart_items import (CommaAxis, DeltaFooterItem, DepthBarDelegate,
+                          FootprintItem, HeatmapCandleItem, SmoothImageItem)
+from .theme import BEAR, BULL, side_colors
 
 GROUPS = ["A", "B", "C"]
 GROUP_COLOR = {None: "#5f6b76", "A": "#ff5454", "B": "#5ad1ff", "C": "#3fe26a"}

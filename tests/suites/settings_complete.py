@@ -11,7 +11,7 @@ while labelled "Vol@price range (new panels)" while no code read it.
 import os, pathlib, re, sys
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
-from orderflow.items import DEFAULTS, HELP_BY_KEY, SETTINGS_SPEC, SPEC_BY_KEY
+from orderflow.settings import DEFAULTS, HELP_BY_KEY, SETTINGS_SPEC, SPEC_BY_KEY
 
 ROOT = pathlib.Path(__file__).resolve().parents[2] / "orderflow"
 
@@ -30,12 +30,12 @@ assert len(SPEC_BY_KEY) == len(DEFAULTS), (len(SPEC_BY_KEY), len(DEFAULTS))
 print("PASS: SPEC_BY_KEY covers every key")
 
 # ---- 2. every setting is consumed somewhere ------------------------------
-items_src = (ROOT / "items.py").read_text(encoding="utf-8")
+items_src = (ROOT / "settings.py").read_text(encoding="utf-8")
 decl = items_src[items_src.index("DEFAULTS = {"):items_src.index("SPEC_BY_KEY")]
 sources = []
 for f in sorted(ROOT.glob("*.py")):
     text = f.read_text(encoding="utf-8")
-    if f.name == "items.py":
+    if f.name == "settings.py":
         text = text.replace(decl, "")     # declaring a key is not using it
     sources.append((f.name, text))
 

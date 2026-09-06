@@ -10,6 +10,22 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **`items.py` is gone, split into three modules that say what they hold.** It was 847
+  lines doing three unrelated jobs under a name that only means something if you already
+  know pyqtgraph — "items" is its word for `QGraphicsObject`. There was even a footprint
+  helper wedged between the colour constants and the settings table.
+
+  | new module | answers |
+  |---|---|
+  | `theme.py` | what colour is a buy, and how are Qt widgets styled |
+  | `settings.py` | what can the user change, and the dialog that edits it |
+  | `chart_items.py` | how the charts are actually painted |
+
+  Code moved verbatim; no behaviour change. `orderflow.__all__`, the README tree, the
+  architecture doc and CONTRIBUTING all describe the new shape.
+
 ### Fixed
 
 - **`vap_mode` was a control that did nothing.** It sat in the dialog labelled

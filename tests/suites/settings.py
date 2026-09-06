@@ -9,8 +9,9 @@ os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from PySide6 import QtCore, QtGui, QtWidgets
 from orderflow import app as of_app, panels as of_panels
-from orderflow.items import (DEFAULTS, HELP_BY_KEY, SETTINGS_SPEC, SPEC_BY_KEY,
-                             SettingsDialog, side_colors)
+from orderflow.settings import (DEFAULTS, HELP_BY_KEY, SETTINGS_SPEC, SPEC_BY_KEY,
+                                SettingsDialog)
+from orderflow.theme import side_colors
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _synth import events_for  # noqa: E402
