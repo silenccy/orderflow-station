@@ -10,6 +10,18 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The window died with no traceback when a symbol left the screen.** Hiding or
+  retargeting the last panel for a symbol made `_sync_feeds` drop that feed with
+  `self.feeds.pop(sym).stop()`. `stop()` only *requests* cancellation — it posts
+  `task.cancel()` to the feed's event loop and returns while `run()` is still
+  going — so the popped thread's last Python reference died with the statement
+  and the C++ `QThread` destructor ran on a live thread. Windows answered with an
+  access violation inside `QtCore.pyd`: no Python traceback, no crash dialog,
+  just a vanished window. It now binds, stops and `wait(2000)`s, the same as the
+  two other teardown paths already did. Regression test: `tests/suites/feed_lifetime.py`.
+
 ## [3.0.0] - 2026-09-06
 
 Major, because two things break an existing setup: `orderflow.items` no longer exists —

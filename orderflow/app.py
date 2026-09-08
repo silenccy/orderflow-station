@@ -1198,7 +1198,15 @@ class MainWindow(QtWidgets.QMainWindow):
         want = set(self._wanted_symbols())
         for sym in list(self.feeds):
             if sym not in want:
-                self.feeds.pop(sym).stop()
+                # Bind it, stop it, JOIN it. stop() only requests
+                # cancellation and returns while run() is still going, so
+                # `self.feeds.pop(sym).stop()` would drop the last Python
+                # reference to a live QThread — the C++ destructor then
+                # runs on a running thread and Windows kills the process
+                # with an access violation inside QtCore, no traceback.
+                th = self.feeds.pop(sym)
+                th.stop()
+                th.wait(2000)
         for sym in sorted(want - set(self.feeds)):
             th = FeedThread(sym, self._sink, reconnect=self.cfg["reconnect"],
                             backoff_max=self.cfg["backoff_max"])
