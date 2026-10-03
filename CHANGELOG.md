@@ -31,9 +31,27 @@ capability without breaking anything. **PATCH** is fixes only.
   rather than replaced.
 - Settings from 3.0.x have no watchlist. One migration derives it from whatever the saved
   roster already pointed at, so an upgrade keeps watching exactly what it watched before.
+- **A native crash left an undated blob in `crash.log`.** `faulthandler` writes its dump
+  straight from C with no timestamp, so when the window died on 2026-09-08 the log could
+  not say *when* — the crash had to be dated from the Windows event log instead.
+  `install()` now stamps a dated, pid-tagged header the moment it arms, so even an access
+  violation lands under a line that says which run it belongs to.
+
+- **`book_buffer`** (General): how many book snapshots to keep per symbol, default 4000.
 
 ### Changed
 
+- **The replay buffer is bounded, so a long day no longer grows without limit.** The cap
+  is deliberately asymmetric, because the two event kinds are nothing alike. Measured on
+  the 2026-08-31 archive, book snapshots are **92 % of the buffer at ~5.5 KB each**, while
+  a whole session of trades is 8.7 MB — and nothing on screen reads an old book frame: the
+  DOM shows only the newest and the heatmap keeps its own bounded window. The footprint,
+  CVD, volume profile and tape, by contrast, need **every** trade of the session. So books
+  are capped and trades are never dropped. Replaying the real 2.3 h BUMI session, the
+  buffer falls from **82.2 MB to 24.8 MB** with every trade retained, and it stops growing
+  rather than merely growing slower. Trimming is counted and shown in `--debug` as
+  `books_trimmed=N`, because a trimmed buffer means a rebuilt heatmap starts later than
+  the session did and that should never be a surprise.
 - **Event retention is tiered, and this is what makes a long watchlist affordable.**
   `self.events` is the replay buffer models rebuild from and it is never trimmed: measured
   with `tracemalloc`, a liquid symbol costs **~36 MB per symbol-hour**, so a 6.5 h session

@@ -37,7 +37,9 @@ DEFAULTS = {
     "reload_freq_tol": 3, "reload_min_count": 3,
     "depth_levels": 30, "signal_rows": 300,
     "reconnect": True, "backoff_max": 30,
-    "history": "today",
+    # 4000 book frames ~= 22 MB/symbol and covers ~28 min at the default 1 s
+    # heatmap throttle, comfortably more than the 1500-column window spans.
+    "history": "today", "book_buffer": 4000,
 }
 
 # (tab, [(key, label, kind, spec)]) — kind: bool | int | double | choice
@@ -160,6 +162,12 @@ SETTINGS_SPEC = [
     ("General", [
         ("history", "Live history preload (restart)", "choice", ["today", "all", "none"],
          "How much of the archive to preload. Takes effect on the next launch."),
+        ("book_buffer", "Book frames kept per symbol", "int", (500, 100000),
+         "Book snapshots are 92% of memory — about 5.5 KB each, against 1 KB for a "
+         "trade — and only the newest matters to the DOM while the heatmap keeps its "
+         "own bounded window. Trades are never dropped, because the footprint, CVD "
+         "and volume profile need the whole session. Raise this only if a rebuilt "
+         "heatmap looks short; lower it if a long day eats RAM."),
     ]),
 ]
 

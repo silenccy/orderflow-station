@@ -200,6 +200,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_diag_t = 0.0
         self._derived = {}           # symbol -> running last/trades/vol
         self._summaries = {}         # symbol -> latest summary dict
+        self._book_counts = {}       # symbol -> book frames held (see _trim_books)
+        self._book_scan = {}         # symbol -> how far we have counted already
+        self._books_trimmed = 0      # lifetime, for --debug
         self._measure = False
 
         syms = [s for s in dict.fromkeys(symbols) if s] or ["ASII"]
@@ -233,6 +236,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.takeCentralWidget()
 
         self._restore_cfg()
+        # Preloaded history obeys the same cap. --history all on a grown archive
+        # is the easiest way to start the session already holding hundreds of MB.
+        for sym, evs in self.events.items():
+            self._trim_books(sym, evs)
         self._restore_panels()
         self._rebuild_panels_menu()
         self.refresh()
@@ -973,6 +980,10 @@ class MainWindow(QtWidgets.QMainWindow):
         if self.diag_lbls:
             for lbl, html in zip(self.diag_lbls, self._diag_html(d, age)):
                 lbl.setText(html)
+        if self._books_trimmed:
+            # Say it out loud: a trimmed buffer means a rebuilt heatmap starts
+            # later than the session did, and that should never be a surprise.
+            text += "  books_trimmed=%d" % self._books_trimmed
         if to_stderr:
             print("[diag %s] %s" % (datetime.now().strftime("%H:%M:%S"), text),
                   file=sys.stderr, flush=True)
@@ -1297,16 +1308,51 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_status(self, symbol, text):
         self.status_lbl.setText("   %s: %s" % (symbol, text))
 
+    def _trim_books(self, symbol, buf):
+        """Drop the oldest book snapshots once a symbol holds more than
+        cfg['book_buffer'] of them. Trades and summaries are never dropped.
+
+        The split is not arbitrary. Measured on the 2026-08-31 archive, book
+        frames are 92 % of the buffer at ~5.5 KB each, while a whole session of
+        trades is 8.7 MB — and nothing displays an old book frame: the DOM shows
+        only the newest, and the heatmap keeps its own bounded window
+        (OrderflowModel._heatmap_max). The footprint, CVD, VAP and tape, by
+        contrast, need every trade of the session, so capping events uniformly
+        would break the charts to save almost nothing.
+
+        Trimming is amortised: it only runs once a symbol is 25 % over the cap,
+        so the O(n) rebuild happens rarely rather than on every batch."""
+        cap = max(100, int(self.cfg.get("book_buffer") or 4000))
+        n_book = self._book_counts.get(symbol, 0) + sum(
+            1 for e in buf[self._book_scan.get(symbol, 0):] if e[0] == "book")
+        self._book_scan[symbol] = len(buf)
+        self._book_counts[symbol] = n_book
+        if n_book <= cap * 1.25:
+            return
+        drop = n_book - cap
+        out, dropped = [], 0
+        for ev in buf:
+            if dropped < drop and ev[0] == "book":
+                dropped += 1
+                continue
+            out.append(ev)
+        buf[:] = out
+        self._book_counts[symbol] = n_book - dropped
+        self._book_scan[symbol] = len(buf)
+        self._books_trimmed += dropped
+
     @QtCore.Slot(str, list)
     def _on_live_batch(self, symbol, evs):
         # Retention is tiered, and this is the line that makes a long watchlist
-        # affordable. self.events is the replay buffer models rebuild from and
-        # it is never trimmed: measured against the 2026-08-31 archive a liquid
-        # symbol costs ~36 MB per hour, so a 6.5 h session is ~233 MB EACH. Only
-        # symbols something is actually drawing earn that. The rest get _tally,
-        # which is three counters and is what the watchlist table reads anyway.
+        # affordable. self.events is the replay buffer models rebuild from:
+        # measured against the 2026-08-31 archive a liquid symbol costs ~36 MB
+        # per hour, so a 6.5 h session is ~233 MB EACH. Only symbols something is
+        # actually drawing earn that. The rest get _tally, which is three
+        # counters and is what the watchlist table reads anyway.
         if symbol in self._charted_symbols():
-            self.events.setdefault(symbol, []).extend(evs)
+            buf = self.events.setdefault(symbol, [])
+            buf.extend(evs)
+            self._trim_books(symbol, buf)
         self._tally(symbol, evs)
         for key, m in self.models.items():        # fan out to every model on this symbol
             if key[0] == symbol:

@@ -152,6 +152,18 @@ def install():
     threading.excepthook = _thread_excepthook
     try:                     # interpreter-level crashes that never reach Python
         _fault_fp = open(CRASH_LOG, "a", encoding="utf-8")
+        # faulthandler writes its dump with no date on it. On 2026-09-08 that
+        # left an undated blob in crash.log and the crash could only be placed
+        # in time from the Windows event log. Stamp the run up front, so even a
+        # native access violation lands under a header that says when and which
+        # pid -- the dump itself still comes from C, after this line.
+        _fault_fp.write(
+            "%s\n[%s] faulthandler armed (pid %d)\n"
+            "  any 'Windows fatal exception' / 'Fatal Python error' block below\n"
+            "  belongs to THIS run until the next armed line.\n%s\n"
+            % ("=" * 72, datetime.now().isoformat(timespec="seconds"),
+               os.getpid(), "-" * 72))
+        _fault_fp.flush()
         faulthandler.enable(file=_fault_fp)
     except (OSError, ValueError, RuntimeError):
         _fault_fp = None
