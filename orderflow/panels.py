@@ -19,7 +19,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from . import model as of_model
 from .chart_items import (CommaAxis, DeltaFooterItem, DepthBarDelegate,
                           FootprintItem, HeatmapCandleItem, SmoothImageItem)
-from .theme import BEAR, BULL, side_colors
+from .theme import BEAR, BULL, DIM, side_colors
 
 GROUPS = ["A", "B", "C"]
 GROUP_COLOR = {None: "#5f6b76", "A": "#ff5454", "B": "#5ad1ff", "C": "#3fe26a"}
@@ -1224,7 +1224,40 @@ class WatchlistPanel(Panel):
         self.tbl.setToolTip("Click: point this panel's link group at the symbol.\n"
                             "Double-click: open a new footprint for it.")
         lay.addWidget(self.tbl)
+
+        # Watching is cheap — a feed and three counters — so this edits the
+        # subscription set directly. A symbol only costs real memory once a
+        # panel charts it; see MainWindow._on_live_batch.
+        row = QtWidgets.QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        self.add_edit = QtWidgets.QLineEdit()
+        self.add_edit.setPlaceholderText("add ticker")
+        self.add_edit.setMaxLength(4)
+        self.add_edit.returnPressed.connect(self._add)
+        add = QtWidgets.QPushButton("+")
+        add.setFixedWidth(26)
+        add.setToolTip("Watch this symbol without charting it")
+        add.clicked.connect(self._add)
+        rm = QtWidgets.QPushButton("−")
+        rm.setFixedWidth(26)
+        rm.setToolTip("Stop watching the selected symbol")
+        rm.clicked.connect(self._remove)
+        row.addWidget(self.add_edit, 1)
+        row.addWidget(add)
+        row.addWidget(rm)
+        lay.addLayout(row)
         return w
+
+    def _add(self):
+        sym = self.add_edit.text().strip().upper()
+        if len(sym) == 4 and sym.isalpha() and self.host.add_to_watchlist(sym):
+            self.add_edit.clear()
+
+    def _remove(self):
+        for r in sorted({i.row() for i in self.tbl.selectedIndexes()}):
+            sym = self._sym_at(r)
+            if sym:
+                self.host.remove_from_watchlist(sym)
 
     def _sym_at(self, row):
         it = self.tbl.item(row, 0)
@@ -1245,7 +1278,9 @@ class WatchlistPanel(Panel):
         syms = sorted(stats)
         self.tbl.setRowCount(len(syms))
         rgt = QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-        active = {p.spec()["symbol"] for p in self.host.panels if p.wants_model}
+        active = {p.spec()["symbol"] for p in self.host.panels
+                  if p.wants_model and not p.isHidden()}
+        watched = set(getattr(self.host, "watchlist", ()) or ())
         bold = QtGui.QFont()
         bold.setBold(True)
         for i, sym in enumerate(syms):
@@ -1264,7 +1299,9 @@ class WatchlistPanel(Panel):
                 if j == 2 and chg is not None:
                     it.setForeground(BULL if chg >= 0 else BEAR)
                 if sym in active:
-                    it.setFont(bold)
+                    it.setFont(bold)          # charted: has a model and a buffer
+                elif sym in watched and j != 2:
+                    it.setForeground(DIM)     # watched only: streaming, no buffer
                 self.tbl.setItem(i, j, it)
 
 

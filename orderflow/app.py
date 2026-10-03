@@ -202,7 +202,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._summaries = {}         # symbol -> latest summary dict
         self._measure = False
 
-        syms = list(symbols) or ["ASII"]
+        syms = [s for s in dict.fromkeys(symbols) if s] or ["ASII"]
+        # Every symbol asked for is watched. Only the first three can seed the
+        # link groups, and that used to be the whole story: syms[3:] were simply
+        # dropped here, so picking six tickers silently charted three (and a
+        # restored roster then overwrote even those). The watchlist is now the
+        # source of truth for what we subscribe to; groups only say what is
+        # charted. _restore_panels re-derives it once for pre-3.1 settings.
+        self.watchlist = list(syms)
         self.groups = {g: {"symbol": syms[min(i, len(syms) - 1)],
                            "bar_kind": bar_kind, "bar_size": bar_size}
                        for i, g in enumerate(of_panels.GROUPS)}
@@ -401,7 +408,8 @@ class MainWindow(QtWidgets.QMainWindow):
     def symbols(self):
         """Every symbol we could chart: whatever is in the archive, plus any
         symbol a group already points at."""
-        out = set(self.events) | {g["symbol"] for g in self.groups.values() if g["symbol"]}
+        out = (set(self.events) | set(self.watchlist)
+               | {g["symbol"] for g in self.groups.values() if g["symbol"]})
         return sorted(s for s in out if s)
 
     def symbol_stats(self):
@@ -623,6 +631,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 "panels": [dict(p.state(), visible=p.isVisible()) for p in self.panels],
                 "groups": self.groups,
                 "next_uid": self._next_uid,
+                "watchlist": list(self.watchlist),
             }))
         except (TypeError, ValueError):
             pass
@@ -643,6 +652,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 if name in self.groups and isinstance(spec, dict):
                     self.groups[name].update(spec)
             self._next_uid = int(data.get("next_uid") or 1)
+            saved_watch = data.get("watchlist")
+            if isinstance(saved_watch, list) and saved_watch:
+                # A saved watchlist is the user's; union in the symbols this
+                # launch asked for so a new pick from the Start dialog is never
+                # thrown away again (the old behaviour this release fixes).
+                self.watchlist = sorted(
+                    {w for w in saved_watch if w} | set(self.watchlist))
+            else:
+                # Pre-3.1 settings have no watchlist. Derive one from what the
+                # roster was already pointing at, so an upgrade keeps watching
+                # exactly what it watched before, then persist it below.
+                self.watchlist = sorted(
+                    set(self.watchlist)
+                    | {g.get("symbol") for g in (data.get("groups") or {}).values()
+                       if isinstance(g, dict) and g.get("symbol")}
+                    | {d.get("spec", {}).get("symbol")
+                       for d in data["panels"] if d.get("spec", {}).get("symbol")})
             for d in data["panels"]:
                 cls = of_panels.PANEL_TYPES.get(d.get("kind"))
                 if cls is None:
@@ -1038,11 +1064,50 @@ class MainWindow(QtWidgets.QMainWindow):
     # ------------------------------------------------------------------
     #  Session: token + who is recording
     # ------------------------------------------------------------------
+    def _charted_symbols(self):
+        """Symbols a visible panel is actually drawing. These, and only these,
+        need a replay buffer and a model — see _on_live_batch."""
+        return {p.spec()["symbol"] for p in self.panels
+                if p.wants_model and not p.isHidden() and p.spec()["symbol"]}
+
     def _wanted_symbols(self):
-        """The symbols on screen right now — what the feeds serve, what the
-        writer lock records, and what the recorder is asked to capture."""
-        return sorted({p.spec()["symbol"] for p in self.panels
-                       if p.wants_model and not p.isHidden() and p.spec()["symbol"]})
+        """What the feeds serve, what the writer lock records, what the recorder
+        captures: everything watched, plus anything charted.
+
+        Charted symbols are unioned in so that pointing a panel at a ticker that
+        is not on the watchlist still works — it subscribes and adds itself,
+        rather than silently drawing nothing."""
+        return sorted({s for s in self.watchlist if s} | self._charted_symbols())
+
+    def add_to_watchlist(self, symbol):
+        """Watch a symbol without dedicating a panel to it. Costs one feed and
+        three counters; no replay buffer until something charts it."""
+        sym = (symbol or "").strip().upper()
+        if not sym or sym in self.watchlist:
+            return False
+        self.watchlist.append(sym)
+        self._sync_feeds()
+        self._save_roster()
+        self._refresh_watchlists()
+        return True
+
+    def remove_from_watchlist(self, symbol):
+        """Stop watching. Refused while a visible panel still charts it —
+        _wanted_symbols would union it straight back in and the row would
+        reappear, which looks like the click did nothing."""
+        sym = (symbol or "").strip().upper()
+        if sym not in self.watchlist or sym in self._charted_symbols():
+            return False
+        self.watchlist.remove(sym)
+        self._sync_feeds()
+        self._save_roster()
+        self._refresh_watchlists()
+        return True
+
+    def _refresh_watchlists(self):
+        for p in self.panels:
+            if p.kind == "watchlist" and not p.isHidden():
+                p.refresh()
 
     def _we_are_writer(self):
         """True only if this window took the lock. Deliberately not a pid
@@ -1082,8 +1147,21 @@ class MainWindow(QtWidgets.QMainWindow):
                         % (why.strip() if why else "see data/capture.log"))
         self.session_lbl.setText(
             "<span style='color:%s'>%s</span>"
-            "<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>%s%s&nbsp;&nbsp;"
-            % (of_startup.TOKEN_COLOR[state], ttext, rec, self._integrity_chip()))
+            "<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>%s%s%s&nbsp;&nbsp;"
+            % (of_startup.TOKEN_COLOR[state], ttext, rec, self._watch_chip(),
+               self._integrity_chip()))
+
+    def _watch_chip(self):
+        """watching N - charting M. Silence here is what let six chosen symbols
+        become one without a word."""
+        if not self.live:
+            return ""
+        watched, charted = len(self._wanted_symbols()), len(self._charted_symbols())
+        if watched <= charted:
+            return ""
+        return ("<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>"
+                "<span style='color:#7f8792'>watching %d &middot; charting %d</span>"
+                % (watched, charted))
         self.rec_btn.setText(" ■ Stop " if alive else " ● Record ")
 
     def _integrity_chip(self):
@@ -1221,7 +1299,14 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @QtCore.Slot(str, list)
     def _on_live_batch(self, symbol, evs):
-        self.events.setdefault(symbol, []).extend(evs)
+        # Retention is tiered, and this is the line that makes a long watchlist
+        # affordable. self.events is the replay buffer models rebuild from and
+        # it is never trimmed: measured against the 2026-08-31 archive a liquid
+        # symbol costs ~36 MB per hour, so a 6.5 h session is ~233 MB EACH. Only
+        # symbols something is actually drawing earn that. The rest get _tally,
+        # which is three counters and is what the watchlist table reads anyway.
+        if symbol in self._charted_symbols():
+            self.events.setdefault(symbol, []).extend(evs)
         self._tally(symbol, evs)
         for key, m in self.models.items():        # fan out to every model on this symbol
             if key[0] == symbol:

@@ -209,6 +209,12 @@ workstation runs offline — no connection, no token. Fastest way to explore the
 2. **During** — chart freely. Add, move and tab panels; change symbols and bar bases.
    Close and reopen the window whenever you like: **recording keeps running**, because
    the recorder is a detached process, not a child of the chart.
+
+   Every symbol you ticked is **watched** — subscribed, and ticking in the Watchlist
+   panel — whether or not a chart is pointed at it. Watching costs a feed and three
+   counters; only the symbols you actually chart keep a replay buffer in memory. The
+   toolbar says `watching 6 · charting 2` whenever the two differ. Use the Watchlist
+   panel's `+` / `−` to follow a ticker without giving up screen space to it.
 3. **After the close** — press **Stop**, then fold the day into the regime evaluation:
    `orderflow-backtest --symbol ASII`.
 
@@ -279,7 +285,7 @@ in **Help ▸ ?** in the toolbar. The flags exist for scripting and headless ren
 | flag | |
 |---|---|
 | `--replay` / `--live` | chart captured CSVs (default) or connect to the feed |
-| `--symbol ASII BBCA` | one or more 4-letter tickers; the first three seed link groups A, B and C |
+| `--symbol ASII BBCA` | one or more 4-letter tickers; all are watched, the first three seed link groups A, B and C |
 | `--view-only` | live mode without writing CSVs — applied automatically when something else holds the writer lock |
 | `--debug` | diagnostics status bar (flow, book health, feed age, integrity check) |
 | `--bars time\|tick\|volume`, `--size N` | bar basis and size |

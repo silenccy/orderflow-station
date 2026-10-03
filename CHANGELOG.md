@@ -10,6 +10,37 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **A real watchlist: the symbols you pick are the symbols you get.** The watched set is
+  now explicit state, persisted with the roster, and it — not the layout — decides what
+  the app subscribes to. `WatchlistPanel` gained `+` / `−` so you can watch a ticker
+  without dedicating a panel to it, and the session toolbar shows `watching N · charting M`
+  whenever those differ, because silence is what let six symbols become one.
+- Watching is deliberately cheap. Measured against the 2026-08-31 archive, the live
+  protobuf parse costs **20 µs/frame**, so one extra watched symbol is ~0.02 % of one core
+  even at the opening bell.
+
+### Fixed
+
+- **Picking six symbols streamed one.** Two defects stacked. `MainWindow.__init__` seeded
+  the three link groups with `syms[min(i, len(syms) - 1)]` and dropped `syms[3:]` on the
+  floor, so three of six vanished before anything else ran. Then `_restore_panels`
+  reinstated a saved roster whose panels all pointed at ASII, losing the survivors too.
+  The Start dialog's choice is now kept, and a restored watchlist is unioned with it
+  rather than replaced.
+- Settings from 3.0.x have no watchlist. One migration derives it from whatever the saved
+  roster already pointed at, so an upgrade keeps watching exactly what it watched before.
+
+### Changed
+
+- **Event retention is tiered, and this is what makes a long watchlist affordable.**
+  `self.events` is the replay buffer models rebuild from and it is never trimmed: measured
+  with `tracemalloc`, a liquid symbol costs **~36 MB per symbol-hour**, so a 6.5 h session
+  is ~233 MB *each*. Only symbols a visible panel is drawing now earn a buffer; the rest
+  get `_tally`, which is three counters and is what the watchlist table reads anyway.
+  Charting a watched symbol starts its buffer from that moment.
+
 ## [3.0.1] - 2026-10-03
 
 ### Fixed
