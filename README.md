@@ -204,8 +204,22 @@ workstation runs offline — no connection, no token. Fastest way to explore the
 
 ### A trading session, start to finish
 
-1. **Before the open** — launch, pick **Live**, tick your symbols and
-   **Also record to disk**, press Start.
+Steps 1 and 2 — the whole trading day — need no terminal and no flags: just the launcher
+and the Start dialog. Only the optional evaluation in step 3 is a command.
+
+1. **Before the open — check the token first.** Launch (double-click
+   **Orderflow Station.bat**) and look at the token line in the Start dialog. Green means
+   good for the day. Red means press **Get token…** and grab a fresh one: tokens last
+   about 24 hours, and a live session without one connects and then shows nothing at all.
+
+   Then pick **Live**, tick your symbols, tick **Also record to disk**, and press
+   **Start**. That checkbox starts the recorder as its own detached process and leaves
+   the chart as a reader — which is what keeps the archive safe if the window dies.
+
+   > If the chart stays empty, it is almost always the token. The status bar says
+   > `no session token — click Token to grab one`, and the **Token** button in the
+   > toolbar grabs one without restarting. For anything stranger, double-click
+   > **Diagnose.bat**.
 2. **During** — chart freely. Add, move and tab panels; change symbols and bar bases.
    Close and reopen the window whenever you like: **recording keeps running**, because
    the recorder is a detached process, not a child of the chart.
@@ -215,7 +229,8 @@ workstation runs offline — no connection, no token. Fastest way to explore the
    counters; only the symbols you actually chart keep a replay buffer in memory. The
    toolbar says `watching 6 · charting 2` whenever the two differ. Use the Watchlist
    panel's `+` / `−` to follow a ticker without giving up screen space to it.
-3. **After the close** — press **Stop**, then fold the day into the regime evaluation:
+3. **After the close** — press **Stop**. Optionally fold the day into the regime
+   evaluation, which is the one part with no button:
    `orderflow-backtest --symbol ASII`.
 
 The toolbar's **Record** button and the status chip beside it always tell you who is
