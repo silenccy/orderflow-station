@@ -12,13 +12,16 @@ Drawing code is the same as the old single-window build — it moved off
 MainWindow onto the panel that owns it, bodies intact.
 """
 
+from datetime import datetime
+
 import numpy as np
 import pyqtgraph as pg
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from . import model as of_model
 from .chart_items import (CommaAxis, DeltaFooterItem, DepthBarDelegate,
-                          FootprintItem, HeatmapCandleItem, SmoothImageItem)
+                          FootprintItem, HeatmapCandleItem, SmoothImageItem, TimeAxis,
+                          WallItem)
 from .theme import BEAR, BULL, DIM, side_colors
 
 GROUPS = ["A", "B", "C"]
@@ -565,6 +568,68 @@ class VapPanel(ChartPanel):
 # ============================================================
 #  Liquidity heatmap
 # ============================================================
+WALL_MIN_SECS = 30.0     # a level must HOLD this long to count as a wall
+WALL_BLINK = 2           # columns a wall may flicker out without ending
+WALL_LABELS_MAX = 8      # standing walls drawn (and labelled), biggest first
+WALLS_MAX = 12           # walls outlined in total, standing ones included
+GAP_LABEL_SEC = 300.0    # time gaps at least this long get their length written on
+# No setting for WALL_MIN_SECS on purpose: on the 2026-08-31 BUMI session the wall
+# count barely moves with it (~21 walls at 15 s, ~18 at 120 s, both at 3x); size,
+# which wall_mult already controls, is the filter that matters.
+
+
+def pick_walls(walls, eps, max_total=WALLS_MAX, max_alive=WALL_LABELS_MAX):
+    """Which walls to outline, so the overlay stays bounded whatever the market.
+
+    How many walls a window holds depends on the market far more than on any
+    threshold: range-bound real BUMI gave 21 walls with a median life of 31 min,
+    the trending preview session 201 walls with a median life of 46 s -- two
+    hundred boxes chasing the price, which is the clutter this is meant to cure.
+    So: every STANDING wall first (biggest first, they are the actionable ones),
+    then the strongest ENDED walls by size x lifetime, up to max_total."""
+    alive = sorted((w for w in walls if w["alive"]), key=lambda w: -w["size"])[:max_alive]
+    ended = sorted((w for w in walls if not w["alive"]),
+                   key=lambda w: -(w["size"] * (eps[w["j1"]] - eps[w["j0"]])))
+    return alive, alive + ended[:max(0, max_total - len(alive))]
+
+
+def _compact(n):
+    """1,839,686 -> '1.8M'; 220,318 -> '220.3k'; 5,000 -> '5k'. For on-chart labels."""
+    n = float(n)
+    for div, suf in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if abs(n) >= div:
+            return ("%.1f" % (n / div)).rstrip("0").rstrip(".") + suf
+    return "%d" % round(n)
+
+
+def _duration(sec):
+    sec = int(round(sec))
+    h, rem = divmod(sec, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return "%dh %02dm" % (h, m)
+    return "%dm %02ds" % (m, s) if m else "%ds" % s
+
+
+def heat_readout(hit, ep, cfg):
+    """What the cursor is on, in words: '09:12:40 · 202 · bid 182,400 lots'.
+
+    hit is HeatGrid.value_at(); the three cell meanings it keeps apart are
+    spelled out rather than shown as one colour."""
+    t = datetime.fromtimestamp(ep).strftime("%H:%M:%S")
+    if hit is None:
+        return "%s · off the ladder" % t
+    price, v, side, _ep = hit
+    px = ("{:,.0f}" if float(price).is_integer() else "{:,g}").format(price)
+    if v != v:                                   # NaN: the feed did not show this far
+        return "%s · %s · beyond the visible depth" % (t, px)
+    if v == 0:
+        return "%s · %s · nothing resting" % (t, px)
+    unit, word = (100, "lots") if cfg.get("header_units") == "lots" else (1, "sh")
+    who = {"bid": "bid", "ask": "ask"}.get(side, "at mid")
+    return "%s · %s · %s %s %s" % (t, px, who, "{:,.0f}".format(v / unit), word)
+
+
 @register
 class HeatmapPanel(ChartPanel):
     kind = "heatmap"
@@ -572,140 +637,189 @@ class HeatmapPanel(ChartPanel):
     cross_y = True
 
     def build(self):
-        pw = self._make_plot()
+        # x is still a column index (columns are not evenly spaced in time), but
+        # the axis now reads clock time instead of 0, 200, 400
+        self.taxis = TimeAxis(orientation="bottom")
+        pw = self._make_plot(axisItems={"bottom": self.taxis})
+        self.grid = of_model.HeatGrid()
+        self._grid_src = None                    # which model.heatmap the grid mirrors
+        self._drawn = None                       # what the field was last painted from
+        self._eq_order = np.zeros(0)             # sorted sizes the legend inverts against
+        self._alive = []                         # walls standing at the right edge
+        self._tep_src, self._tep = None, []      # trade epochs, parsed once each
+        self._bub_key = None                     # what the bubbles were last drawn from
         self.hm_img = SmoothImageItem()          # bilinear smoothing (Bookmap-like)
         self.p.addItem(self.hm_img)
         self._cmap_name = None
-        self.hm_price = self.p.plot([], [], pen=pg.mkPen(240, 244, 250, 210, width=2.2))
-        dash = QtCore.Qt.PenStyle.DashLine       # biggest resting bid/ask per column
-        shadow = pg.mkPen(8, 10, 12, 220, width=3)   # dark under-stroke on bright bands
-        self.hm_bidwall = self.p.plot([], [], pen=pg.mkPen(63, 226, 106, 230,
-                                                           width=1.4, style=dash),
-                                      shadowPen=shadow)
-        self.hm_askwall = self.p.plot([], [], pen=pg.mkPen(255, 84, 84, 230,
-                                                           width=1.4, style=dash),
-                                      shadowPen=shadow)
+        self.hm_price = self.p.plot([], [], pen=pg.mkPen(240, 244, 250, 220, width=2.0),
+                                    shadowPen=pg.mkPen(6, 8, 10, 200, width=4))
+        self.hm_walls = WallItem()
+        self.p.addItem(self.hm_walls)
         self.hm_trades = pg.ScatterPlotItem(pxMode=True, pen=None)
         self.p.addItem(self.hm_trades)
         self.hm_candles = HeatmapCandleItem()    # added last -> draws on top
         self.p.addItem(self.hm_candles)
+        self._wall_labels = []                   # pooled; only standing walls get one
+        self._gap_marks = []                     # pooled dashed lines at time gaps
+
+        # Legend. The bar owns the image's lookup table and levels from here on
+        # -- nothing else calls setLookupTable/setLevels, so they cannot fight.
+        # Its axis is relabelled from colour back into LOTS, so yellow is a number.
+        self.cbar = pg.ColorBarItem(values=(0, 1), width=10, interactive=False,
+                                    rounding=1e-9, colorMapMenu=False)
+        self.cbar.setImageItem(self.hm_img, insert_in=self.p)
+        self.cbar.axis.tickStrings = self._legend_strings
+
+        # Hover readout, pinned to the view's corner so it never pans away.
+        self.readout = pg.TextItem(anchor=(0, 0), color=(225, 230, 236),
+                                   fill=pg.mkBrush(8, 10, 12, 215))
+        self.readout.setParentItem(self.p.vb)
+        self.readout.setPos(6, 4)
+        self.readout.setZValue(60)
+        self.readout.setVisible(False)
+        self._vline = pg.InfiniteLine(angle=90, pen=pg.mkPen(
+            "#6d7680", width=1, style=QtCore.Qt.PenStyle.DashLine))
+        self._vline.setVisible(False)
+        self._vline.setZValue(50)
+        self.p.addItem(self._vline, ignoreBounds=True)
         self._init_cross()
         return pw
 
     def set_colormap(self, name):
-        """Heatmap LUT. 'bookmap' is the hand-tuned palette; the rest come from
+        """'bookmap' is the hand-tuned palette; the rest come from
         pyqtgraph/matplotlib, falling back to bookmap if unavailable."""
         if name == self._cmap_name:
             return
         self._cmap_name = name
-        lut = None
+        cm = None
         if name != "bookmap":
             for src in ("matplotlib", None):
                 try:
                     cm = pg.colormap.get(name, source=src) if src else pg.colormap.get(name)
-                    lut = cm.getLookupTable(0.0, 1.0, 256)
-                    break
                 except Exception:
-                    lut = None
-        if lut is None:
+                    cm = None
+                # without matplotlib installed, source="matplotlib" RETURNS None
+                # rather than raising -- breaking on it would silently swap the
+                # user's colormap for the bookmap fallback
+                if cm is not None:
+                    break
+        if cm is None:
             bm_pos = np.array([0.0, 0.10, 0.28, 0.48, 0.68, 0.85, 1.0])
             bm_col = np.array([[7, 9, 18, 255], [12, 24, 64, 255], [22, 72, 168, 255],
                                [22, 176, 200, 255], [122, 216, 74, 255],
                                [255, 216, 32, 255], [255, 255, 255, 255]], dtype=np.ubyte)
-            lut = pg.ColorMap(bm_pos, bm_col).getLookupTable(0.0, 1.0, 256)
-        self.hm_img.setLookupTable(lut)
+            cm = pg.ColorMap(bm_pos, bm_col)
+        self.cbar.setColorMap(cm)
+
+    def _legend_strings(self, values, scale, spacing):
+        c = self.cfg
+        unit = 100 if c["header_units"] == "lots" else 1
+        return [_compact(of_model.heat_unscale(v, c["hm_scale"], c["hm_gamma"],
+                                               self._eq_order) / unit)
+                for v in values]
 
     def _clear(self):
+        self.grid.reset()
+        self._grid_src = self._drawn = self._bub_key = None
+        self._alive = []
         self.hm_img.clear()
+        self.taxis.set_epochs(None)
         self.hm_price.setData([], [])
-        self.hm_bidwall.setData([], [])
-        self.hm_askwall.setData([], [])
+        self.hm_walls.set_walls([])
         self.hm_trades.setData([])
         self.hm_candles.set_bars([])
+        self._place_labels([])
+        self._place_gaps([])
+        self.readout.setVisible(False)
+        self._vline.setVisible(False)
 
     def refresh(self):
         c = self.cfg
         self.set_colormap(c["colormap"])
         m = self.model()
-        if m is None:
+        if m is None or not m.heatmap:
             self._clear()
             return
-        cols = m.heatmap
-        if not cols:
+        if self._grid_src != id(m.heatmap):      # another symbol, or a rebuilt model
+            self.grid.reset()
+            self._grid_src = id(m.heatmap)
+            self._drawn = None
+        g = self.grid
+        g.update(m.heatmap)
+        if not g.eps or not g.ladder:
             self._clear()
             return
-        prices = sorted({p for _e, snap, _mid in cols for p in snap})
-        if not prices:
-            return
-        tick = min((b - a for a, b in zip(prices, prices[1:])), default=5) or 5
-        pmin = min(prices)
-        nrows = int(round((max(prices) - pmin) / tick)) + 1
-        arr = np.zeros((nrows, len(cols)), dtype=float)
-        for j, (_e, snap, _mid) in enumerate(cols):
-            for p, v in snap.items():
-                arr[int(round((p - pmin) / tick)), j] = v
-        if c["hm_scale"] == "equalize":
-            # Rank-based (histogram equalization): colour = size *percentile*, so the
-            # field stays readable whatever the size distribution. gamma darkens the
-            # bulk — median level ~ rank 0.5 -> 0.5^y of the palette; only the top few
-            # percent reach yellow/white, like Bookmap.
-            nz = arr[arr > 0]
-            if nz.size:
-                order = np.sort(nz)
-                ranks = np.searchsorted(order, arr, side="right") / len(order)
-                arr = np.where(arr > 0, ranks ** c["hm_gamma"], 0.0)
-            hi = 1.0
-        else:
-            if c["hm_scale"] == "log":
-                arr = np.log1p(arr)
-            elif c["hm_scale"] == "sqrt":
-                arr = np.sqrt(arr)              # compress heavy tails ("linear" = as-is)
-            nz = arr[arr > 0]
-            hi = float(np.percentile(nz, c["hm_pctile"])) if nz.size else 1.0
-        self.hm_img.setImage(arr, autoLevels=False)
-        self.hm_img.setLevels([0, hi or 1])
-        self.hm_img.setRect(QtCore.QRectF(0, pmin - tick / 2, len(cols), nrows * tick))
+        # The field only changes when a column arrives (one per hm_throttle) or a
+        # setting does. Refreshes come at live_hz on every trade, so skipping the
+        # rest is most of the saving: the old code rebuilt the whole array -- 32 ms,
+        # ~23 % of a core at 7 Hz -- even when nothing in it had moved.
+        key = (g.version, c["hm_scale"], c["hm_gamma"], c["hm_pctile"], c["hm_throttle"],
+               c["show_price_line"], c["show_walls"], c["wall_mult"],
+               c.get("buy_color"), c.get("sell_color"))
+        if key != self._drawn:
+            self._drawn = key
+            self._draw_field(c)
+        self._draw_overlays(m, c)
 
-        # Overlays (x = heatmap column space): price line, OHLC candles, bubbles
-        col_eps = np.array([e for e, _s, _mid in cols])
-        xs = np.arange(len(cols))
-        e0, e1 = col_eps[0], col_eps[-1]
+    def _draw_field(self, c):
+        g = self.grid
+        scaled, hi, self._eq_order = of_model.heat_scale(
+            g.levels, c["hm_scale"], c["hm_gamma"], c["hm_pctile"])
+        y0, row_h, row2lvl = g.rows()
+        self.hm_img.setImage(g.display(scaled), autoLevels=False)
+        self.cbar.setLevels((0.0, hi))
+        # Under equalize the levels are (0, 1) forever, so the bar's axis would
+        # never redraw -- yet what each colour MEANS in lots moves with every
+        # column. Force the relabel, or the legend freezes at the first column.
+        self.cbar.axis.picture = None
+        self.cbar.axis.update()
+        # column j is centred on x = j, the same x every overlay uses for it
+        self.hm_img.setRect(QtCore.QRectF(-0.5, y0, len(g.eps), len(row2lvl) * row_h))
+        # Pre-open has a full book and no trades. This y-axis follows the group's
+        # footprint, which is empty then, so the shared range sat at its default
+        # and the whole field was off-screen: a blank heatmap exactly when the
+        # auction book is worth watching. With no bars to anchor to -- and only
+        # if the field is entirely out of view, so a deliberate zoom is never
+        # undone -- frame the book.
+        top = y0 + len(row2lvl) * row_h
+        vlo, vhi = self.p.vb.viewRange()[1]
+        m = self.model()
+        if m is not None and not m.bar_ids() and (vhi < y0 or vlo > top):
+            self.p.vb.setYRange(y0, top, padding=0.02)
+        gap = max(10.0, 5.0 * float(c["hm_throttle"]))
+        self.taxis.set_epochs(g.eps, gap)
+        self._place_gaps(g.gaps(gap))
 
         if c["show_price_line"]:
-            lx = [j for j, (_e, _s, mid) in enumerate(cols) if mid is not None]
-            ly = [mid for _e, _s, mid in cols if mid is not None]
-            self.hm_price.setData(lx, ly)
+            pts = [(j, mid) for j, mid in enumerate(g.mids) if mid is not None]
+            self.hm_price.setData([x for x, _y in pts], [y for _x, y in pts])
         else:
             self.hm_price.setData([], [])
 
         if c["show_walls"]:
-            # price level holding the largest resting size each side of the mid — the
-            # gap from the price line to these = your distance to the big orders
-            bx, by, ax_, ay = [], [], [], []
-            for j, (_e, snap, mid) in enumerate(cols):
-                if mid is None or not snap:
-                    continue
-                bw = aw = None
-                bv = av = 0.0
-                for p, v0 in snap.items():
-                    if p < mid:
-                        if v0 > bv:
-                            bv, bw = v0, p
-                    elif p > mid and v0 > av:
-                        av, aw = v0, p
-                if bw is not None:
-                    bx.append(j)
-                    by.append(bw)
-                if aw is not None:
-                    ax_.append(j)
-                    ay.append(aw)
-            self.hm_bidwall.setData(bx, by)
-            self.hm_askwall.setData(ax_, ay)
+            walls = g.persistent_walls(c["wall_mult"], WALL_MIN_SECS, WALL_BLINK)
+            self._alive, shown = pick_walls(walls, g.eps)
+            lo, hi_ = g.bands()
+            sc = side_colors(c)
+            rects = []
+            for w in shown:
+                i = g.level_at(w["price"])
+                rects.append((w["j0"] - 0.5, w["j1"] + 0.5, lo[i], hi_[i], w["side"]))
+            self.hm_walls.set_walls(rects, sc["buy"], sc["sell"])
         else:
-            self.hm_bidwall.setData([], [])
-            self.hm_askwall.setData([], [])
+            self.hm_walls.set_walls([])
+            self._alive = []
 
-        if c["show_hm_candles"] and len(cols) > 1:
+    def _draw_overlays(self, m, c):
+        """Candles, trade bubbles and wall labels move with every trade and every
+        zoom, so they are redrawn each refresh. All of them are cheap."""
+        g = self.grid
+        col_eps = np.asarray(g.eps, dtype=float)
+        xs = np.arange(len(col_eps))
+        e0, e1 = col_eps[0], col_eps[-1]
+        self._place_labels(self._alive)
+
+        if c["show_hm_candles"] and len(col_eps) > 1:
             crows = []
             for b in m.bar_ids():
                 meta = m.bar_meta.get(b)
@@ -717,34 +831,125 @@ class HeatmapPanel(ChartPanel):
                 if x1 - x0 < 1.0:
                     x1 = x0 + 1.0               # single-print bar still visible
                 crows.append((x0, x1, meta["o"], max(cells), min(cells), meta["c"]))
-            self.hm_candles.set_bars(crows, tick)
+            self.hm_candles.set_bars(crows, g.rows()[1])
         else:
             self.hm_candles.set_bars([])
 
+        self._draw_bubbles(m, c, col_eps, xs)
+
+    def _draw_bubbles(self, m, c, col_eps, xs):
+        """Trade bubbles, sized by volume. This was 33 of the 45 ms an idle
+        refresh cost, profiled on the real BUMI session, for two reasons:
+        every trade's ISO timestamp was re-parsed on every refresh (2,000 a
+        time), and each bubble got a continuous float size, so pyqtgraph
+        rendered a fresh symbol for nearly every one. Trades are append-only,
+        so each is parsed once; sizes are whole pixels, so ~28 symbols are
+        reused; and an unchanged set of trades is not re-sent at all."""
+        tr = m.trades
         if not c["show_bubbles"]:
+            if self._bub_key is not None:
+                self.hm_trades.setData([])
+                self._bub_key = None
+            return
+        if self._tep_src != id(tr):
+            self._tep_src, self._tep = id(tr), []
+        if len(self._tep) < len(tr):
+            self._tep.extend(of_model.trade_epoch(r) for r in tr[len(self._tep):])
+        e0, e1 = float(col_eps[0]), float(col_eps[-1])
+        key = (id(tr), len(tr), e0, e1, c["bubble_opacity"], c["bubble_ref_pct"],
+               c["bubble_min_frac"])
+        if key == self._bub_key:
+            return
+        self._bub_key = key
+        lo = max(0, len(tr) - 2000)
+        eps_t = np.array([np.nan if e is None else e for e in self._tep[lo:]], dtype=float)
+        with np.errstate(invalid="ignore"):
+            inwin = (eps_t >= e0) & (eps_t <= e1)
+        if not inwin.any():
             self.hm_trades.setData([])
             return
-        win = []
-        for r in m.trades[-2000:]:
-            ep = of_model.trade_epoch(r)
-            if ep is not None and e0 <= ep <= e1:
-                win.append((ep, r))
-        spots = []
-        if win:
-            op = c["bubble_opacity"]
-            buy_b, sell_b = pg.mkBrush(63, 226, 106, op), pg.mkBrush(255, 84, 84, op)
-            qref = float(np.percentile([r["qty"] for _e, r in win],
-                                       c["bubble_ref_pct"])) or 1
-            minfrac = c["bubble_min_frac"]
-            for ep, r in win:
-                frac = (r["qty"] / qref) ** 0.5
-                if frac < minfrac:              # hide small prints -> less clutter
-                    continue
-                x = float(np.interp(ep, col_eps, xs))
-                spots.append({"pos": (x, r["price"]), "size": min(2 + 11 * frac, 15),
-                              "brush": buy_b if r.get("side") == "buy" else sell_b,
-                              "pen": None})
-        self.hm_trades.setData(spots)
+        recent = tr[lo:]
+        qty = np.array([r["qty"] for r in recent], dtype=float)
+        frac = np.sqrt(qty / (float(np.percentile(qty[inwin], c["bubble_ref_pct"])) or 1.0))
+        keep = inwin & (frac >= c["bubble_min_frac"])     # hide small prints
+        if not keep.any():
+            self.hm_trades.setData([])
+            return
+        op = c["bubble_opacity"]
+        buy_b, sell_b = pg.mkBrush(63, 226, 106, op), pg.mkBrush(255, 84, 84, op)
+        idx = np.flatnonzero(keep)
+        self.hm_trades.setData(
+            x=np.interp(eps_t[idx], col_eps, xs),
+            y=np.array([recent[i]["price"] for i in idx], dtype=float),
+            size=np.rint(np.minimum(2 + 11 * frac[idx], 15)),
+            brush=[buy_b if recent[i].get("side") == "buy" else sell_b for i in idx],
+            pen=None)
+
+    def _place_labels(self, walls):
+        """Size labels on STANDING walls only, biggest first, and never two on top
+        of each other: levels a tick apart are a few pixels apart, so a label is
+        skipped when it would land within one text height of a bigger one."""
+        unit = 100 if self.cfg["header_units"] == "lots" else 1
+        try:
+            py = abs(self.p.vb.viewPixelSize()[1])
+        except Exception:
+            py = 0.0
+        shown = []
+        for w in walls:
+            if len(shown) >= WALL_LABELS_MAX:
+                break
+            if all(abs(w["price"] - s["price"]) >= 16 * py for s in shown):
+                shown.append(w)
+        while len(self._wall_labels) < len(shown):
+            t = pg.TextItem(anchor=(1, 0.5), color=(236, 239, 243),
+                            fill=pg.mkBrush(8, 10, 12, 205))
+            t.setZValue(55)
+            self.p.addItem(t, ignoreBounds=True)
+            self._wall_labels.append(t)
+        for t, w in zip(self._wall_labels, shown):
+            t.setText(_compact(w["size"] / unit))
+            t.setPos(w["j1"] + 0.5, w["price"])
+            t.setVisible(True)
+        for t in self._wall_labels[len(shown):]:
+            t.setVisible(False)
+
+    def _place_gaps(self, gaps):
+        """A dashed line where time jumps between columns, labelled with its
+        length once it is long enough to matter (a disconnect, the lunch break)."""
+        while len(self._gap_marks) < len(gaps):
+            ln = pg.InfiniteLine(
+                angle=90, label="",
+                pen=pg.mkPen(150, 156, 164, 160, width=1, style=QtCore.Qt.PenStyle.DashLine),
+                labelOpts={"position": 0.96, "color": (170, 176, 184),
+                           "fill": (8, 10, 12, 200)})
+            ln.setZValue(40)
+            self.p.addItem(ln, ignoreBounds=True)
+            self._gap_marks.append(ln)
+        for ln, (j, sec) in zip(self._gap_marks, gaps):
+            ln.setPos(j + 0.5)
+            ln.label.setFormat(("gap " + _duration(sec)) if sec >= GAP_LABEL_SEC else "")
+            ln.setVisible(True)
+        for ln in self._gap_marks[len(gaps):]:
+            ln.setVisible(False)
+
+    def _mouse_moved(self, evt):
+        super()._mouse_moved(evt)              # keeps the group's price crosshair
+        g = self.grid
+        pos = evt[0]
+        if not g.eps or not self.p.vb.sceneBoundingRect().contains(pos):
+            self.readout.setVisible(False)
+            self._vline.setVisible(False)
+            return
+        pt = self.p.vb.mapSceneToView(pos)
+        j = int(round(pt.x()))
+        if not 0 <= j < len(g.eps):
+            self.readout.setVisible(False)
+            self._vline.setVisible(False)
+            return
+        self._vline.setPos(j)
+        self._vline.setVisible(True)
+        self.readout.setText(heat_readout(g.value_at(j, pt.y()), g.eps[j], self.cfg))
+        self.readout.setVisible(True)
 
 
 # ============================================================
@@ -1242,6 +1447,11 @@ class WatchlistPanel(Panel):
         rm.setFixedWidth(26)
         rm.setToolTip("Stop watching the selected symbol")
         rm.clicked.connect(self._remove)
+        for b in (add, rm):
+            # DARK_QSS pads every QPushButton 14 px each side; at 26 px wide that
+            # left the text no room at all and both buttons rendered blank
+            b.setStyleSheet("padding: 0px;")
+        self.add_btn, self.rm_btn = add, rm
         row.addWidget(self.add_edit, 1)
         row.addWidget(add)
         row.addWidget(rm)

@@ -147,6 +147,26 @@ assert win_one._watch_chip() == "", "no chip when nothing is hidden from you"
 print("PASS: chip shows %r when they differ, nothing when they do not"
       % ("watching/charting",))
 
+# ---- 9. the + / - buttons actually show their glyphs ------------------------
+# DARK_QSS pads every QPushButton 14 px a side; at 26 px wide that left the
+# content box empty and both buttons rendered as blank squares.
+win.show()
+app.processEvents()
+wl = (next((p for p in win.panels if p.kind == "watchlist"), None)
+      or win.add_panel("watchlist", group="A"))
+wl.setVisible(True)
+app.processEvents()
+for b in (wl.add_btn, wl.rm_btn):
+    b.ensurePolished()
+    opt = QtWidgets.QStyleOptionButton()
+    opt.initFrom(b)
+    opt.text = b.text()
+    room = b.style().subElementRect(QtWidgets.QStyle.SubElement.SE_PushButtonContents,
+                                    opt, b).width()
+    need = b.fontMetrics().horizontalAdvance(b.text())
+    assert room >= need, "%r button has %d px of room for a %d px glyph" % (b.text(), room, need)
+print("PASS: + and - buttons have room for their glyphs")
+
 for nm in ("wl_basic", "wl_restore", "wl_add", "wl_migrate", "wl_chip"):
     QtCore.QSettings("orderflow-test", nm).clear()
 print()

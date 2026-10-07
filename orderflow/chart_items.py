@@ -10,8 +10,11 @@ registry -- each takes a model duck-typed at draw time.
 told you nothing unless you already knew the library.)
 """
 
+import math
 from collections import Counter
+from datetime import datetime
 
+import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
@@ -54,6 +57,63 @@ class CommaAxis(pg.AxisItem):
 
     def tickStrings(self, values, scale, spacing):
         return [f"{v * scale:,.0f}" for v in values]
+
+
+class TimeAxis(pg.AxisItem):
+    """Bottom axis for a chart whose x is a column index but whose columns carry
+    timestamps — the heatmap. It used to read 0, 200, 400: column numbers.
+
+    Ticks land on round CLOCK times (1/2/5/10/15/30 min ...) mapped back to
+    columns, and read HH:MM, or HH:MM:SS once ticks are under a minute apart.
+    Columns are not evenly spaced in time — a disconnect or IDX's lunch break is
+    one column step — so a tick time that falls inside such a gap is dropped
+    instead of piling onto its neighbour."""
+
+    STEPS = (1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 14400)
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self._eps = self._xs = None
+        self._gap = None
+        self._fmt = "%H:%M"
+
+    def set_epochs(self, eps, gap_sec=None):
+        """eps[j] is column j's epoch; column j sits at x = j."""
+        if eps is None or len(eps) < 2:
+            self._eps = self._xs = None
+        else:
+            self._eps = np.asarray(eps, dtype=float)
+            self._xs = np.arange(len(self._eps), dtype=float)
+        self._gap = gap_sec
+        self.picture = None                     # AxisItem caches its drawing
+        self.update()
+
+    def epoch_at(self, x):
+        return float(np.interp(x, self._xs, self._eps))
+
+    def tickValues(self, minVal, maxVal, size):
+        if self._eps is None:
+            return super().tickValues(minVal, maxVal, size)
+        t0, t1 = self.epoch_at(minVal), self.epoch_at(maxVal)
+        if t1 <= t0:
+            return []
+        want = max(2, int(size / 90))           # ~90 px per label
+        step = next((s for s in self.STEPS if (t1 - t0) / s <= want), self.STEPS[-1])
+        self._fmt = "%H:%M:%S" if step < 60 else "%H:%M"
+        # round in LOCAL time, so 30-minute steps fall on :00 and :30 anywhere
+        off = datetime.fromtimestamp(t0).astimezone().utcoffset().total_seconds()
+        first = math.ceil((t0 + off) / step) * step - off
+        times = np.arange(first, t1 + 1e-6, step)
+        if self._gap and len(times):
+            seg = np.diff(self._eps)
+            j = np.clip(np.searchsorted(self._eps, times) - 1, 0, len(seg) - 1)
+            times = times[seg[j] <= self._gap]
+        return [(float(step), [float(x) for x in np.interp(times, self._eps, self._xs)])]
+
+    def tickStrings(self, values, scale, spacing):
+        if self._eps is None:
+            return super().tickStrings(values, scale, spacing)
+        return [datetime.fromtimestamp(self.epoch_at(v)).strftime(self._fmt) for v in values]
 
 
 # ============================================================
@@ -354,7 +414,12 @@ class DeltaFooterItem(pg.GraphicsObject):
 
 class HeatmapCandleItem(pg.GraphicsObject):
     """OHLC candles overlaid on the liquidity heatmap (x = heatmap column space,
-    one candle per footprint bar, bar-width like the Binance-style heatmaps)."""
+    one candle per footprint bar).
+
+    HOLLOW on purpose. They used to be solid bodies at alpha 220 and 84 % of the
+    bar width, drawn on top — exactly over the price band where the resting
+    liquidity is the whole point of the chart. An outline still reads as OHLC
+    and leaves what is underneath visible."""
 
     def __init__(self):
         super().__init__()
@@ -365,18 +430,21 @@ class HeatmapCandleItem(pg.GraphicsObject):
         """rows: [(x0, x1, open, high, low, close)] in heatmap column coords."""
         self.picture = QtGui.QPicture()
         p = QtGui.QPainter(self.picture)
+        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
         for x0, x1, o, h, l, c in rows:
             col = QtGui.QColor(BULL if c >= o else BEAR)
+            col.setAlpha(215)
+            p.setPen(QtGui.QPen(col, 0))          # width 0 = cosmetic, 1 px at any zoom
             cx = (x0 + x1) / 2
-            p.setPen(QtGui.QPen(col, 0))
-            p.drawLine(QtCore.QPointF(cx, l), QtCore.QPointF(cx, h))
             bot, top = min(o, c), max(o, c)
             if top - bot < tick * 0.25:
                 top = bot + tick * 0.25       # doji stays visible
-            body = QtGui.QColor(col)
-            body.setAlpha(220)
-            w = x1 - x0
-            p.fillRect(QtCore.QRectF(x0 + 0.08 * w, bot, 0.84 * w, top - bot), body)
+            if h > top:                       # wicks stop at the body: it is hollow,
+                p.drawLine(QtCore.QPointF(cx, top), QtCore.QPointF(cx, h))
+            if l < bot:                       # so a wick through it would show
+                p.drawLine(QtCore.QPointF(cx, l), QtCore.QPointF(cx, bot))
+            w = 0.6 * (x1 - x0)
+            p.drawRect(QtCore.QRectF(cx - w / 2, bot, w, top - bot))
         p.end()
         if rows:
             xa = min(r[0] for r in rows)
@@ -384,6 +452,56 @@ class HeatmapCandleItem(pg.GraphicsObject):
             ylo = min(r[4] for r in rows)
             yhi = max(r[3] for r in rows)
             self._brect = QtCore.QRectF(xa, ylo - tick, xb - xa, (yhi - ylo) + 2 * tick)
+        else:
+            self._brect = QtCore.QRectF()
+        self.informViewBoundsChanged()
+        self.update()
+
+    def boundingRect(self):
+        return self._brect
+
+    def paint(self, p, *args):
+        p.drawPicture(0, 0, self.picture)
+
+
+class WallItem(pg.GraphicsObject):
+    """Persistent resting walls on the heatmap: a thin outline hugging each
+    wall's price band for as long as it stood, coloured by side.
+
+    Replaces two dashed lines that traced the single largest bid and ask in
+    every column — an argmax that flipped level to level and zigzagged across
+    the chart. A wall here is a level that HELD (HeatGrid.persistent_walls), so
+    what you see is something you could lean on, drawn lightly enough that the
+    heatmap underneath stays the information."""
+
+    def __init__(self):
+        super().__init__()
+        self.picture = QtGui.QPicture()
+        self._brect = QtCore.QRectF()
+
+    def set_walls(self, rects, bid_color=BULL, ask_color=BEAR):
+        """rects: [(x0, x1, y_lo, y_hi, side)] in heatmap column/price coords."""
+        self.picture = QtGui.QPicture()
+        p = QtGui.QPainter(self.picture)
+        p.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        under = QtGui.QPen(QtGui.QColor(6, 8, 10, 200), 3)   # dark halo: readable on yellow
+        under.setCosmetic(True)
+        for x0, x1, lo, hi, side in rects:
+            r = QtCore.QRectF(x0, lo, x1 - x0, hi - lo)
+            col = QtGui.QColor(bid_color if side == "bid" else
+                               ask_color if side == "ask" else TXT)
+            col.setAlpha(235)
+            over = QtGui.QPen(col, 1)
+            over.setCosmetic(True)
+            p.setPen(under)
+            p.drawRect(r)
+            p.setPen(over)
+            p.drawRect(r)
+        p.end()
+        if rects:
+            self._brect = QtCore.QRectF(min(r[0] for r in rects), min(r[2] for r in rects),
+                                        max(r[1] for r in rects) - min(r[0] for r in rects),
+                                        max(r[3] for r in rects) - min(r[2] for r in rects))
         else:
             self._brect = QtCore.QRectF()
         self.informViewBoundsChanged()

@@ -10,6 +10,54 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Changed — the liquidity heatmap, rebuilt to be readable
+
+Every problem below was confirmed against the real 2026-08-31 BUMI session, not the README
+preview, which is a synthetic random walk and hid the worst of them.
+
+- **It reads clock time.** The x-axis was the column index — 0, 200, 400. `TimeAxis` puts
+  ticks on round clock times (1/2/5/10/15/30 min) and labels them `HH:MM`, `HH:MM:SS` when
+  zoomed in. A dashed line marks any jump between columns — a disconnect, or the lunch
+  break — which a column axis silently compressed into one step; jumps of 5 min or more
+  carry their length.
+- **No more stripes.** IDX changes tick size at 200 / 500 / 2,000 / 5,000, and the grid used
+  one global minimum tick. On BUMI that made every odd row above 200 a price that cannot
+  exist — **0.0 % filled** — so the field striped and smoothing blended each real level with
+  a dead neighbour, roughly halving it. Each level now paints its own tick band, inferred
+  from the ladder rather than hard-coded, and the y-axis stays in price so the heatmap
+  still links to the footprint.
+- **Unknown is not "empty".** Cells beyond the feed's visible depth used to paint as the
+  colormap's floor — 29 % of the BUMI canvas, and the flat purple slab in the old preview.
+  They are now transparent, so the coloured field's edge *is* the depth edge.
+- **A legend in lots, and a readout.** A colour bar labelled in lots (inverting the
+  equalize ranking, so yellow is a number), and hovering reads out the cell:
+  `09:12:40 · 202 · bid 182,400 lots`, or *beyond the visible depth* / *nothing resting*.
+- **Walls you can lean on.** The two dashed lines that traced the single largest bid and ask
+  per column flipped level to level and zigzagged across the chart. A wall is now a level
+  holding ≥ `wall_mult` × the column's median for 30 s — the DOM's own rule, so the word
+  means the same in both panels — outlined across its life, with the standing ones labelled
+  by size. The overlay is capped at 12: walls per window depend on the market far more than
+  on any threshold (range-bound BUMI: 21, median life 31 min; the trending preview: 201,
+  median life 46 s), so it shows every standing wall plus the strongest ended ones.
+- **Hollow candles.** They were solid at 86 % opacity across 84 % of the bar, on top of the
+  very price band the heatmap exists to show.
+- **Pre-open no longer blank.** The heatmap's y-axis follows the group's footprint, which is
+  empty before the first trade — so during IDX's pre-open auction, full book and no
+  trades, the whole field sat off-screen. With no bars to anchor to, it frames the book.
+- **Far cheaper to keep open.** Measured on the real session, the old panel cost
+  **~77 ms on every refresh** — about half a core at the default 7 Hz — rebuilding its whole
+  array even when nothing had moved, and rendering a fresh symbol for nearly every trade
+  bubble because each had a continuous size. `HeatGrid` now updates incrementally (0.12 ms
+  per column), the field is repainted only when a column or setting changes, trade
+  timestamps are parsed once, and bubble sizes are whole pixels. An idle refresh is now
+  **0.56 ms**; one with a new column ~15 ms.
+
+### Fixed
+
+- **The Watchlist's `+` / `−` buttons rendered blank.** `DARK_QSS` pads every `QPushButton`
+  14 px a side; at 26 px wide that left −4 px for a 12 px glyph. Found by looking at the
+  regenerated preview, and now checked against the live stylesheet in the suite.
+
 ### Added
 
 - **A real watchlist: the symbols you pick are the symbols you get.** The watched set is

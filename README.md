@@ -33,7 +33,7 @@ random-walk session — the shapes are real, the prices are invented. Regenerate
 | Panel | |
 |---|---|
 | **Footprint** | Per-bar, per-price bid×ask volume clusters with diagonal imbalance highlighting, gold POC, V/D/R-H/R-L headers, mid OHLC candles, and **absorption markers** (heavy volume rejected at a bar extreme). Switchable to plain candlesticks. |
-| **Liquidity heatmap** | Resting book depth over time, rank-equalized so real walls stand out; overlaid price line, OHLC candles, trade bubbles, and dashed lines tracking the **largest resting bid/ask** so you can see your distance to the big orders. |
+| **Liquidity heatmap** | Resting book depth on a **clock-time** axis, each level painted across its real IDX tick band — no stripes where the tick size changes at 200 / 500 / 2,000 / 5,000. A colour legend in **lots** and a hover readout (`09:12:40 · 202 · bid 182,400 lots`) say what you are looking at; beyond the feed's visible depth stays dark rather than passing for "no liquidity". **Persistent walls** — levels that held ≥ *Wall × median* for 30 s — are outlined, the standing ones labelled with their size. Candles are hollow so they never hide the book. |
 | **Volume profile** | Session volume-at-price (butterfly), tick-binned, with POC and value area. |
 | **CVD** | Cumulative volume delta in lots, with honest line breaks across capture gaps. |
 | **DOM + tape** | Quantower-style centered ladder: depth bars, BBO highlight, per-level session volume, a **Chg** column showing size being stacked or pulled, and pinned Σ totals with book imbalance. |
@@ -52,8 +52,9 @@ value-area lines, per-bar delta underneath.
 
 ![Footprint](docs/img/preview-footprint.png)
 
-**Liquidity heatmap and depth curve** — resting size over time with the price line and OHLC
-candles overlaid, and cumulative book depth beside it.
+**Liquidity heatmap and depth curve** — resting size against clock time, with the price line,
+hollow candles, persistent walls and a legend in lots; dashed lines mark where the feed
+dropped. Cumulative book depth beside it. *(Synthetic session, like every screenshot here.)*
 
 ![Heatmap](docs/img/preview-heatmap.png)
 

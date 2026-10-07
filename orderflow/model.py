@@ -8,6 +8,8 @@ maintains everything the chart panels need:
   - CVD           : cumulative signed volume series
   - VolumeAtPrice : price -> {buy, sell} volume (volume profile)
   - HeatmapBuffer : rolling [price x time] resting-size columns
+  - HeatGrid      : those columns as a level matrix the heatmap panel can draw,
+                    updated incrementally, with persistent-wall detection
 
 Aggressor side comes from the exchange's own tag when it is present, and is
 inferred Lee-Ready style only when it is not (quote rule vs the synced book, tick
@@ -16,8 +18,12 @@ and diag() reports which source decided each trade.
 """
 
 import math
+import warnings
+from bisect import bisect_left
 from collections import Counter
 from datetime import datetime
+
+import numpy as np
 
 
 def _weighted_pct(counter, pct):
@@ -666,6 +672,285 @@ class OrderflowModel:
         return {"ready": True, "er": er, "direction": direction, "rv": rv,
                 "rv_pct": rv_pct, "vol_state": vol_state, "core": core,
                 "label": f"{core} · {vol_state}", "vr": vr, "bars": n, "span": span}
+
+
+# ============================================================
+#  Heatmap grid — the columns as something you can actually draw
+# ============================================================
+class HeatGrid:
+    """OrderflowModel.heatmap as a level matrix, kept in step incrementally.
+
+    levels[i, j] is the resting size at ladder[i] in column j, and it carries
+    three distinct meanings that the old pixel grid collapsed into one:
+      NaN  outside that column's visible depth — the feed did not show it, which
+           is NOT the same as "nobody is there"
+      0    a price inside the visible depth with nothing resting
+      > 0  resting size
+
+    Display rows come from rows(): each level paints a band of price around
+    itself, so a tick-2 level covers two tick-1 rows. On IDX the tick changes
+    at 200/500/2000/5000, and the old grid used one global minimum tick — on
+    BUMI every odd row above 200 was a price that cannot exist, permanently
+    empty, which striped the heatmap and let smoothing halve each real level.
+    The y-axis stays in price, so the heatmap still links to the footprint.
+
+    update() mirrors model.heatmap: columns are strictly epoch-increasing, the
+    model only appends at the back and trims at the front, so most refreshes
+    append one column or none. A full rebuild happens only when a new price
+    enters the ladder or the column list is not the one we were mirroring.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.ladder = []
+        self._index = {}
+        self.eps = []
+        self.mids = []
+        self.snaps = []
+        self.levels = np.zeros((0, 0))
+        self.rebuilds = 0
+        self.version = 0          # bumps whenever levels change; lets the panel skip work
+        self._bands = None
+        self._rows = None
+
+    # ---------------- mirroring ----------------
+    def update(self, cols):
+        """Bring the grid in line with cols. Returns 'rebuilt', 'appended',
+        'trimmed' or 'unchanged'."""
+        if not cols:
+            if self.eps:
+                self.reset()
+                self.version += 1
+                return "rebuilt"
+            return "unchanged"
+        k = bisect_left(self.eps, cols[0][0])          # front columns the model dropped
+        keep = len(self.eps) - k
+        same = (keep > 0 and keep <= len(cols)
+                and cols[0][0] == self.eps[k] and cols[keep - 1][0] == self.eps[-1])
+        if not same:
+            return self._rebuild(cols)
+        new = cols[keep:]
+        if any(p not in self._index for _e, s, _m in new for p in s):
+            return self._rebuild(cols)
+        if k == 0 and not new:
+            return "unchanged"
+        block = np.full((len(self.ladder), len(new)), np.nan)
+        for j, (_e, s, _m) in enumerate(new):
+            self._fill(block, j, s)
+        self.levels = np.hstack([self.levels[:, k:], block]) if self.levels.size else block
+        self.eps = self.eps[k:] + [e for e, _s, _m in new]
+        self.mids = self.mids[k:] + [m for _e, _s, m in new]
+        self.snaps = self.snaps[k:] + [s for _e, s, _m in new]
+        self.version += 1
+        return "appended" if new else "trimmed"
+
+    def _rebuild(self, cols):
+        self.ladder = sorted({p for _e, s, _m in cols for p in s})
+        self._index = {p: i for i, p in enumerate(self.ladder)}
+        self.levels = np.full((len(self.ladder), len(cols)), np.nan)
+        for j, (_e, s, _m) in enumerate(cols):
+            self._fill(self.levels, j, s)
+        self.eps = [e for e, _s, _m in cols]
+        self.mids = [m for _e, _s, m in cols]
+        self.snaps = [s for _e, s, _m in cols]
+        self._bands = self._rows = None
+        self.rebuilds += 1
+        self.version += 1
+        return "rebuilt"
+
+    def _fill(self, arr, j, snap):
+        if not snap:
+            return                                   # no book at all: whole column unknown
+        idx = [self._index[p] for p in snap]
+        arr[min(idx):max(idx) + 1, j] = 0.0          # inside visible depth: known
+        for p, v in snap.items():
+            arr[self._index[p], j] = v
+
+    # ---------------- geometry ----------------
+    def bands(self):
+        """(lo, hi) price edges of each ladder level's display band.
+
+        Neighbours one exchange tick apart meet at their midpoint. A gap larger
+        than any tick seen at least twice is a hole — a valid price nobody
+        quoted all window — and is left unpainted rather than smeared over."""
+        if self._bands is not None:
+            return self._bands
+        lad = np.asarray(self.ladder, dtype=float)
+        n = len(lad)
+        if n == 0:
+            self._bands = (lad, lad)
+            return self._bands
+        if n == 1:
+            self._bands = (lad - 0.5, lad + 0.5)
+            return self._bands
+        gaps = np.diff(lad)
+        vals, counts = np.unique(np.round(gaps, 6), return_counts=True)
+        frequent = vals[counts >= 2]
+        adj_max = frequent.max() if frequent.size else gaps.max()
+        common = vals[counts.argmax()]
+        adjacent = gaps <= adj_max + 1e-9
+        tick = np.empty(n)
+        for i in range(n):
+            near = [gaps[g] for g in (i - 1, i) if 0 <= g < n - 1 and adjacent[g]]
+            tick[i] = min(near) if near else common
+        lo, hi = lad - tick / 2, lad + tick / 2
+        for i in range(n - 1):
+            if adjacent[i]:
+                lo[i + 1] = hi[i] = (lad[i] + lad[i + 1]) / 2
+        self._bands = (lo, hi)
+        return self._bands
+
+    def rows(self):
+        """(y0, row_h, row2lvl): the display grid. Row r spans
+        [y0 + r*row_h, y0 + (r+1)*row_h); row2lvl[r] is the ladder level that
+        paints it, or -1 for a hole."""
+        if self._rows is not None:
+            return self._rows
+        lo, hi = self.bands()
+        if not len(lo):
+            self._rows = (0.0, 1.0, np.zeros(0, dtype=int))
+            return self._rows
+        # Row height = the finest spacing the ladder actually uses. Band edges at
+        # tick boundaries fall on half-ticks, but rows are assigned by centre, so
+        # they need not divide the grid -- including them would halve every row.
+        lad = np.rint(np.asarray(self.ladder) * 100).astype(np.int64)
+        g = int(np.gcd.reduce(np.diff(lad))) if len(lad) > 1 else 100
+        row_h = (g or 100) / 100.0
+        first, span = float(self.ladder[0]), float(self.ladder[-1] - self.ladder[0])
+        if span / row_h > 5000:                      # pathological ladder: coarsen
+            row_h = float((hi - lo).min()) or 1.0
+        # centres sit ON prices, so every level owns the row at its own price
+        nrows = int(round(span / row_h)) + 1
+        y0 = first - row_h / 2
+        centres = first + np.arange(nrows) * row_h
+        lvl = np.searchsorted(lo, centres, side="right") - 1
+        ok = (lvl >= 0) & (centres < hi[np.clip(lvl, 0, len(hi) - 1)])
+        self._rows = (y0, row_h, np.where(ok, lvl, -1))
+        return self._rows
+
+    def display(self, values):
+        """values (ladder x cols, e.g. scaled levels) -> image rows x cols,
+        NaN where nothing is known."""
+        _y0, _h, row2lvl = self.rows()
+        ext = np.vstack([values, np.full((1, values.shape[1]), np.nan)])
+        return ext[row2lvl]                          # -1 picks the NaN row
+
+    def level_at(self, price):
+        """Ladder index whose band contains price, or None."""
+        lo, hi = self.bands()
+        if not len(lo):
+            return None
+        i = int(np.searchsorted(lo, price, side="right")) - 1
+        return i if 0 <= i and price < hi[i] else None
+
+    def value_at(self, col, price):
+        """(level price, size or NaN, side, epoch) under the cursor, or None.
+        side is 'bid' below the column's mid, 'ask' above, 'mid' at it."""
+        if not self.eps:
+            return None
+        col = int(min(max(col, 0), len(self.eps) - 1))
+        i = self.level_at(price)
+        if i is None:
+            return None
+        p, v, mid = self.ladder[i], float(self.levels[i, col]), self.mids[col]
+        side = "mid" if mid is None or p == mid else ("bid" if p < mid else "ask")
+        return p, v, side, self.eps[col]
+
+    def gaps(self, min_sec):
+        """[(col, seconds)] where the next column is more than min_sec later —
+        a disconnect, a quiet stretch or IDX's lunch break, which a column axis
+        would otherwise compress into a single step."""
+        if len(self.eps) < 2:
+            return []
+        d = np.diff(np.asarray(self.eps, dtype=float))
+        return [(int(j), float(d[j])) for j in np.flatnonzero(d > min_sec)]
+
+    # ---------------- walls ----------------
+    def persistent_walls(self, mult=3.0, min_secs=30.0, blink=2):
+        """Levels holding >= mult x the column's median resting size for at
+        least min_secs, tolerating `blink` missing columns. Computed on levels,
+        not display rows, so a tick-2 wall is one wall, not two.
+
+        Returns [{price, j0, j1, size, side, alive}] where size is the size at
+        the wall's last column and alive means it still stands at the right edge.
+        mult is the DOM's wall_mult, so "a wall" means the same in both panels."""
+        L = self.levels
+        if not L.size:
+            return []
+        # an empty column's median is NaN, which compares False below -- exactly
+        # right; silence numpy's "All-NaN slice" RuntimeWarning (errstate does
+        # not cover it: it is a warnings.warn, not a floating-point error)
+        with np.errstate(all="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            pos = np.where(L > 0, L, np.nan)
+            med = np.nanmedian(pos, axis=0) if np.isfinite(pos).any() else None
+        if med is None:
+            return []
+        with np.errstate(invalid="ignore"):
+            big = L >= mult * med[None, :]
+        eps = np.asarray(self.eps, dtype=float)
+        last = L.shape[1] - 1
+        out = []
+        for i in range(L.shape[0]):
+            cols = np.flatnonzero(big[i])
+            if not cols.size:
+                continue
+            br = np.flatnonzero(np.diff(cols) > blink + 1)
+            for a, b in zip(np.r_[cols[0], cols[br + 1]], np.r_[cols[br], cols[-1]]):
+                if eps[b] - eps[a] < min_secs:
+                    continue
+                p, mid = self.ladder[i], self.mids[b]
+                out.append({"price": p, "j0": int(a), "j1": int(b),
+                            "size": float(L[i, b]),
+                            "side": None if mid is None else ("bid" if p < mid else "ask"),
+                            "alive": b >= last - blink})
+        return out
+
+
+def heat_scale(levels, mode="equalize", gamma=3.0, pctile=97):
+    """Map resting sizes to colour values. Returns (scaled, hi, order):
+    scaled has the same shape with NaN preserved, the colour range is [0, hi],
+    and order is the sorted non-zero sizes (what heat_unscale inverts against).
+
+    equalize ranks sizes, so colour = size percentile ** gamma: the field stays
+    readable whatever the size distribution, and only the top few percent reach
+    the bright end."""
+    nz = levels[levels > 0]
+    order = np.sort(nz) if nz.size else np.zeros(0)
+    with np.errstate(invalid="ignore"):
+        if mode == "equalize":
+            if order.size:
+                ranks = np.searchsorted(order, levels, side="right") / len(order)
+                scaled = np.where(levels > 0, ranks ** gamma, levels)   # 0 stays 0, NaN stays NaN
+            else:
+                scaled = levels.copy()
+            return scaled, 1.0, order
+        if mode == "log":
+            scaled = np.log1p(levels)
+        elif mode == "sqrt":
+            scaled = np.sqrt(levels)
+        else:
+            scaled = levels.astype(float, copy=True)
+    snz = scaled[scaled > 0]
+    hi = float(np.percentile(snz, pctile)) if snz.size else 1.0
+    return scaled, hi or 1.0, order
+
+
+def heat_unscale(value, mode="equalize", gamma=3.0, order=None):
+    """Colour value -> resting size: the inverse of heat_scale, so the legend can
+    label its colours in lots rather than in percentile-to-the-gamma."""
+    v = max(float(value), 0.0)
+    if mode == "equalize":
+        if order is None or not len(order):
+            return 0.0
+        return float(np.quantile(order, min(v, 1.0) ** (1.0 / gamma)))
+    if mode == "log":
+        return float(math.expm1(v))
+    if mode == "sqrt":
+        return v * v
+    return v
 
 
 def build_model(events, bar_kind="time", bar_size=60, heatmap_every_sec=0.0, heatmap_max=1500):

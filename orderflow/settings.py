@@ -99,10 +99,13 @@ SETTINGS_SPEC = [
          "Only used by the non-equalize scales: where to clip the brightest sizes."),
         ("show_price_line", "Show price line", "bool", None,
          "Overlay the traded price on the heatmap."),
-        ("show_walls", "Track biggest walls (lines)", "bool", None,
-         "Dashed lines tracking the largest resting bid and ask over time."),
-        ("show_hm_candles", "Overlay OHLC candles", "bool", None,
-         "Overlay OHLC candles on the heatmap columns."),
+        ("show_walls", "Mark persistent walls", "bool", None,
+         "Outline price levels that held at least 'Wall × median' (DOM & Tape) of "
+         "the resting size for 30 s or more — the same rule the DOM uses — with "
+         "their size written on the ones still standing."),
+        ("show_hm_candles", "Overlay OHLC candles (hollow)", "bool", None,
+         "Hollow candle outlines over the heatmap, so the liquidity underneath "
+         "stays visible."),
         ("show_bubbles", "Show trade bubbles", "bool", None,
          "Mark individual trades on the heatmap, sized by volume."),
         ("bubble_ref_pct", "Bubble size percentile", "int", (50, 100),
