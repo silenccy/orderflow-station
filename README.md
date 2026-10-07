@@ -36,7 +36,8 @@ random-walk session — the shapes are real, the prices are invented. Regenerate
 | **Liquidity heatmap** | Resting book depth on a **clock-time** axis, each level painted across its real IDX tick band — no stripes where the tick size changes at 200 / 500 / 2,000 / 5,000. A colour legend in **lots** and a hover readout (`09:12:40 · 202 · bid 182,400 lots`) say what you are looking at; beyond the feed's visible depth stays dark rather than passing for "no liquidity". **Persistent walls** — levels that held ≥ *Wall × median* for 30 s — are outlined, the standing ones labelled with their size. Candles are hollow so they never hide the book. |
 | **Volume profile** | Session volume-at-price (butterfly), tick-binned, with POC and value area. |
 | **CVD** | Cumulative volume delta in lots, with honest line breaks across capture gaps. |
-| **DOM + tape** | Quantower-style centered ladder: depth bars, BBO highlight, per-level session volume, a **Chg** column showing size being stacked or pulled, and pinned Σ totals with book imbalance. |
+| **DOM + tape** | Quantower-style centered ladder: depth bars, BBO highlight, per-level session volume, a **Chg** column showing size being stacked or pulled, an **Avg** column (average order size — one big order and a crowd of small ones look identical by depth alone), and pinned Σ totals with book imbalance. |
+| **Iceberg-style replenishment** | Flags levels that keep getting **refilled after trades eat into them**, including the same-second refill that shows no net change on the ladder — marked `↻` in the DOM with how often and how much was put back. Uses the feed's per-level order count to tell one order reloading from a crowd arriving. A heuristic, not proof: see [the honest note](#replenishment-detection--an-honest-note). |
 | **Regime filter** | Efficiency Ratio + realized-vol + variance ratio → a TREND / CHOP / MIXED label with a live history panel. See the honest caveat below. |
 | **Capture integrity** | Every hole in the tape — when the feed dropped, for how long, and why — with the share of the session actually captured. The feed reconnects by itself; this is what it missed. |
 | **Watchlist** | Every symbol in your archive with last, change %, lot and trade count. Click to point a link group at it; double-click to open a new footprint for it. |
@@ -59,7 +60,8 @@ dropped. Cumulative book depth beside it. *(Synthetic session, like every screen
 ![Heatmap](docs/img/preview-heatmap.png)
 
 **Order book, tape and watchlist** — centred ladder with depth bars, BBO highlight, Σ totals
-and book imbalance.
+and book imbalance. The **Avg** column is average order size per level; `↻` marks a level
+being replenished, and the footer counts them ("4 replenishing").
 
 ![Order book](docs/img/preview-dom-tape.png)
 
@@ -476,6 +478,33 @@ and 1–2 tick moves. `TREND↑` fired twice in six days: far too few to judge. 
 chip as a *stay-out filter*, not a trend caller, and don't loosen the thresholds to make
 it fire more — that's fitting noise. `backtest.py --sweep` deliberately refuses to tune
 thresholds on fewer than 8 captured days.
+
+## Replenishment detection — an honest note
+
+Most people would call this an iceberg detector. It is named for what it can actually see.
+
+Every book level arrives as *price, number of resting orders, total size*. Book snapshots
+come about once a second, so a level that is hit and refilled inside one snapshot shows
+**no net change** — "did it grow?" is the wrong test. Instead each level is measured
+against what *should* have been left:
+
+```
+expected = previous size − shares traded at that price since
+refill   = new size − expected        # > 0: it was topped back up
+```
+
+The order count then separates the two explanations for a refill. Count roughly
+unchanged → consistent with **one order reloading** (the iceberg pattern), and counted.
+Count jumped → **new participants arrived**, which is not counted.
+
+**What it cannot do is prove it.** The feed is aggregated per price with no order IDs, so
+one hidden order reloading and one order leaving while a similar one arrives are
+indistinguishable. A `↻` is evidence, not fact. It is reported as refills **per minute**
+rather than a session total, because on a stock trading in a few ticks almost every traded
+price gets refilled eventually; the rate is what separates a level being actively worked.
+Thresholds — refill share, order-count tolerance, minimum occurrences — are in
+**Settings → DOM & Tape**. It has so far been checked only against recorded sessions, not
+against a live market.
 
 ## Development
 
