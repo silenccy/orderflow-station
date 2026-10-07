@@ -10,6 +10,14 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-10-07
+
+Minor: visual polish -- new capability, nothing removed, no setting renamed. An app
+icon and a title that says what the window is doing, tick flash in the DOM and
+tape, one clock-time language across the charts, and a tape in the same units as
+everything else. Verified by the test suites and by rendering it; the flash only
+shows on live data, and none of this has yet run against a live market.
+
 ### Added
 
 - **An app icon, drawn in code.** A tiny order book — asks over bids, sized like depth bars,
@@ -386,7 +394,8 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/silenccy/orderflow-station/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/silenccy/orderflow-station/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/silenccy/orderflow-station/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/silenccy/orderflow-station/compare/v2.0.0...v3.0.0
