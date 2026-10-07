@@ -524,14 +524,33 @@ class DepthBarDelegate(QtWidgets.QStyledItemDelegate):
         self.bar = QtGui.QColor(color); self.bar.setAlpha(120)   # solid QT-style blocks
         self.wall = QtGui.QColor(color); self.wall.setAlpha(205)
 
+    COLOR_ROLE = QtCore.Qt.ItemDataRole.UserRole + 2   # optional per-item bar colour
+
     def paint(self, painter, option, index):
+        # Order matters: background, then bar, then text. Qt's own pass paints
+        # the cell background too, so letting it run last (as this used to) would
+        # paint a tick flash or a big-print highlight straight over the bar.
+        bg = index.data(QtCore.Qt.ItemDataRole.BackgroundRole)
+        if bg is not None:
+            painter.fillRect(option.rect, bg)
         frac = index.data(QtCore.Qt.ItemDataRole.UserRole)
         if frac:
             r = option.rect
             w = int(r.width() * min(float(frac), 1.0))
-            col = self.wall if index.data(QtCore.Qt.ItemDataRole.UserRole + 1) else self.bar
+            wall = bool(index.data(QtCore.Qt.ItemDataRole.UserRole + 1))
+            own = index.data(self.COLOR_ROLE)
+            if own is not None:
+                col = QtGui.QColor(own)
+                col.setAlpha(self.wall.alpha() if wall else self.bar.alpha())
+            else:
+                col = self.wall if wall else self.bar
             if self.side == "bid":
                 painter.fillRect(QtCore.QRect(r.right() - w, r.top(), w, r.height()), col)
             else:
                 painter.fillRect(QtCore.QRect(r.left(), r.top(), w, r.height()), col)
-        super().paint(painter, option, index)
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.backgroundBrush = QtGui.QBrush()        # text pass must not repaint the cell
+        style = opt.widget.style() if opt.widget is not None else QtWidgets.QApplication.style()
+        style.drawControl(QtWidgets.QStyle.ControlElement.CE_ItemViewItem, opt, painter,
+                          opt.widget)

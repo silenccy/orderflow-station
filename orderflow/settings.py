@@ -40,6 +40,7 @@ DEFAULTS = {
     # 4000 book frames ~= 22 MB/symbol and covers ~28 min at the default 1 s
     # heatmap throttle, comfortably more than the 1500-column window spans.
     "history": "today", "book_buffer": 4000,
+    "tick_flash": True,
 }
 
 # (tab, [(key, label, kind, spec)]) — kind: bool | int | double | choice
@@ -131,6 +132,10 @@ SETTINGS_SPEC = [
          "How many times a level must replenish before it is marked."),
         ("dom_pro", "Pro mode (centered ladder)", "bool", None,
          "Centred ladder with Chg and per-level volume, versus the classic side-by-side book."),
+        ("tick_flash", "Flash changes and new prints", "bool", None,
+         "Live only. A DOM level flashes green when it grows and red when it shrinks, "
+         "the best bid/ask pulses when the touch moves, and new prints enter the tape "
+         "tinted by side — all fading within a second. Off for a still screen."),
         ("dom_resizable", "Resizable columns (drag headers)", "bool", None,
          "Drag column edges to resize. Widths are remembered once you do."),
         ("dom_depth", "DOM depth (rows)", "int", (3, 60),

@@ -1,4 +1,4 @@
-# Orderflow Station
+<h1><img src="docs/img/icon.png" width="44" height="44" align="top" alt=""> Orderflow Station</h1>
 
 [![tests](https://github.com/silenccy/orderflow-station/actions/workflows/ci.yml/badge.svg)](https://github.com/silenccy/orderflow-station/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/tag/silenccy/orderflow-station?label=release&color=3fe26a)](https://github.com/silenccy/orderflow-station/tags)

@@ -43,6 +43,7 @@ if "--shot" in sys.argv and "QT_QPA_PLATFORM" not in os.environ:
 
 from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
 
+from . import brand as of_brand  # noqa: E402
 from . import capture as of_capture  # noqa: E402
 from . import panels as of_panels  # noqa: E402
 from . import startup as of_startup  # noqa: E402
@@ -1161,6 +1162,20 @@ class MainWindow(QtWidgets.QMainWindow):
             "<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>%s%s%s&nbsp;&nbsp;"
             % (of_startup.TOKEN_COLOR[state], ttext, rec, self._watch_chip(),
                self._integrity_chip()))
+        title = self._title_text(alive)
+        if title != self.windowTitle():          # the taskbar repaints on every set
+            self.setWindowTitle(title)
+
+    def _title_text(self, recording):
+        """'Orderflow Station — BUMI +5 · Live · ● Recording'. What the window is
+        doing, readable from the taskbar without bringing it forward."""
+        g = self.group_combo.currentText() or "A"
+        sym = (self.groups.get(g) or {}).get("symbol") or "—"
+        n = len(self._wanted_symbols()) if self.live else 0
+        parts = [sym + (" +%d" % (n - 1) if n > 1 else ""), "Live" if self.live else "Replay"]
+        if recording:
+            parts.append("● Recording")
+        return "Orderflow Station — " + " · ".join(parts)
 
     def _watch_chip(self):
         """watching N - charting M. Silence here is what let six chosen symbols
@@ -1425,8 +1440,10 @@ def main():
             sys.stdout.write(report)
         return
 
+    of_brand.set_app_id()               # before any window: our own taskbar identity
     app = QtWidgets.QApplication(sys.argv)
     app.setFont(QtGui.QFont("Segoe UI", 9))
+    app.setWindowIcon(of_brand.make_icon())   # every window and dialog inherits it
     st = QtCore.QSettings("orderflow", "of_app")
 
     # Launched with no flags at all (double-clicked, or `orderflow-app`): ask,

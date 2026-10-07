@@ -17,7 +17,9 @@ import time
 
 from PySide6 import QtCore, QtGui, QtWidgets
 
+from . import __version__
 from . import feed as of_feed
+from .brand import make_icon
 from .paths import BOOK_CSV, DATA_DIR, TRADES_CSV
 
 # The browser-console catcher, identical to the README's. Kept here so the app
@@ -131,8 +133,8 @@ class StartDialog(QtWidgets.QDialog):
         d = dict(defaults or {})
 
         lay = QtWidgets.QVBoxLayout(self)
-        head = QtWidgets.QLabel("<b>Start a session</b>")
-        lay.addWidget(head)
+        lay.addLayout(self._header())
+        lay.addSpacing(6)
 
         form = QtWidgets.QFormLayout()
         lay.addLayout(form)
@@ -237,6 +239,39 @@ class StartDialog(QtWidgets.QDialog):
         self._validate()
 
     # ---- helpers ----
+    CHIP_TEXT = {TOKEN_OK: "● token ready", TOKEN_AGING: "● token expiring",
+                 TOKEN_MISSING: "● no valid token"}
+
+    def _header(self):
+        """Icon, name and version, with the token's state as a chip on the right
+        -- the one thing worth knowing before anything else in this dialog."""
+        row = QtWidgets.QHBoxLayout()
+        row.setSpacing(10)
+        logo = QtWidgets.QLabel()
+        logo.setPixmap(make_icon().pixmap(40, 40))
+        row.addWidget(logo)
+        col = QtWidgets.QVBoxLayout()
+        col.setSpacing(0)
+        name = QtWidgets.QLabel("Orderflow Station")
+        name.setStyleSheet("font-size:15px; font-weight:600; color:#e6e9ec;")
+        sub = QtWidgets.QLabel("version %s  ·  start a session" % __version__)
+        sub.setStyleSheet("font-size:11px; color:#7f8792;")
+        col.addWidget(name)
+        col.addWidget(sub)
+        row.addLayout(col)
+        row.addStretch(1)
+        self.token_chip = QtWidgets.QLabel()
+        row.addWidget(self.token_chip, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _set_chip(self, state):
+        c = QtGui.QColor(TOKEN_COLOR[state])
+        self.token_chip.setText(self.CHIP_TEXT[state])
+        self.token_chip.setStyleSheet(
+            "QLabel{color:%s; background:rgba(%d,%d,%d,38); border:1px solid %s;"
+            " border-radius:9px; padding:2px 9px; font-size:11px;}"
+            % (c.name(), c.red(), c.green(), c.blue(), c.name()))
+
     def _add_symbol(self):
         sym = self.add_edit.text().strip().upper()
         if len(sym) != 4 or not sym.isalpha():
@@ -262,6 +297,7 @@ class StartDialog(QtWidgets.QDialog):
         self.history.setEnabled(live)
         self.record.setEnabled(live)
         state, text = token_status()
+        self._set_chip(state)
         if live:
             self.token_lbl.setText(
                 "<span style='color:%s'>%s</span>%s"

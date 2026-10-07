@@ -19,7 +19,7 @@ from datetime import datetime
 
 from PySide6 import QtCore, QtWidgets
 
-from orderflow import app as of_app, feed as of_feed
+from orderflow import app as of_app, brand as of_brand, feed as of_feed
 
 OUT = os.path.join(os.getcwd(), "docs", "img")
 BASE = 1_772_002_800.0          # 09:00-ish
@@ -119,8 +119,14 @@ def frame_data(win, app):
         vb = plot.getViewBox() if plot is not None and hasattr(plot, "getViewBox") else None
         if vb is not None:
             try:
-                vb.enableAutoRange()
-                vb.autoRange()
+                if getattr(p, "fixed_y", False):
+                    # it pins its own y-range (Regime: ER lives in [0, 1]).
+                    # Auto-ranging it flattened the chart to its data and hid
+                    # the TREND/CHOP lines -- the screenshot misrepresented the app.
+                    vb.enableAutoRange(axis=vb.XAxis)
+                else:
+                    vb.enableAutoRange()
+                    vb.autoRange()
             except Exception:
                 pass
     for _ in range(4):
@@ -178,6 +184,9 @@ def layout(win, left, right=None, weights=None, rweights=None, group="A"):
 def main():
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     os.makedirs(OUT, exist_ok=True)
+    # the README header shows the same icon the app draws for itself
+    ok = of_brand.make_icon().pixmap(128, 128).save(os.path.join(OUT, "icon.png"))
+    print("  %-28s %s" % ("icon.png", "ok" if ok else "FAILED"))
     events = {"ASII": synth("ASII", 4800, seed=11),
               "BBCA": synth("BBCA", 9200, seed=29, drift=-0.03)}
 

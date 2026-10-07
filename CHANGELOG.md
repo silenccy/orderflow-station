@@ -10,6 +10,46 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Added
+
+- **An app icon, drawn in code.** A tiny order book — asks over bids, sized like depth bars,
+  a gold price line through the touch — rendered at every size from 16 to 256 px, with no
+  binary asset in the repo. The process also registers its own Windows taskbar identity;
+  launched through `pythonw.exe`, Windows otherwise files the window under Python and
+  shows Python's icon whatever the window says.
+- **A title that says what the window is doing**: `Orderflow Station — BUMI +5 · Live ·
+  ● Recording`, readable from the taskbar without bringing it forward.
+- **Tick flash.** Live, a DOM level flashes green as it grows and red as it shrinks, the
+  best bid/offer pulses when the touch moves, and new prints enter the tape tinted by side,
+  all fading within a second — in both DOM layouts. Flashes are keyed to *what* changed,
+  not to a row, so they follow a level or a print as the ladder shifts and the tape
+  scrolls; a fade step touches only the fading cells (~0.01 ms against ~1 ms for a DOM
+  refresh) and its timer stops itself. Replay never flashes. `tick_flash` (DOM & Tape)
+  turns it off for a still screen.
+- **A Start dialog that opens with the app's name, version and token state** as a coloured
+  chip, instead of a bare "Start a session".
+
+### Changed
+
+- **One time language.** The footprint and regime x-axes read clock time (`14:00`,
+  `14:05` …) like the heatmap and CVD, instead of bar numbers 0, 5, 10. Only the labels
+  changed; x is still the bar index, so measuring, linking and the crosshair are untouched.
+- **The tape speaks the same units as every other panel.** Quantity follows
+  `header_units` (lots) instead of raw shares, with a size bar coloured by side and
+  scaled to the 95th-percentile print on screen, and sides read `▲ buy` / `▼ sell`.
+  Scaling to *Big ≥* instead was tried and rejected: on BUMI nearly every print clears
+  50 lots, so every bar sat full; *Big ≥* keeps the highlight and a bolder bar.
+
+### Fixed
+
+- **Depth bars were painted under the cell background.** The bar painter drew its bar and
+  then let Qt paint the cell — background included — on top. Invisible while no size cell
+  had a background; a big-print highlight or a flash would have hidden the bar completely.
+  It now paints background, bar, then text, and a pixel test pins the order.
+- **The README misrepresented the regime panel.** `tools/make_previews.py` auto-ranged
+  every plot, flattening the regime chart to its data and hiding the TREND/CHOP lines the
+  app actually draws. Panels that pin their own range are now left alone.
+
 ## [3.1.0] - 2026-10-07
 
 Minor: new capability, nothing removed, and settings from 3.0.x migrate on first launch.

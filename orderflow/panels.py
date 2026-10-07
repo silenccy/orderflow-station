@@ -12,6 +12,7 @@ Drawing code is the same as the old single-window build — it moved off
 MainWindow onto the panel that owns it, bodies intact.
 """
 
+import time
 from datetime import datetime
 
 import numpy as np
@@ -253,6 +254,25 @@ class ChartPanel(Panel):
         self.p = pw.getPlotItem()
         return pw
 
+    def _label_bar_times(self, m):
+        """Label a bar-index x-axis with each bar's start time, like the heatmap
+        and CVD -- the footprint and regime used to read 0, 5, 10. Only labels
+        change: x stays the bar index, so measuring, linking and the crosshair
+        are untouched. Tick and volume bars are irregular in time by nature, so
+        they get labels without the gap rule time bars use."""
+        ids = m.bar_ids()
+        key = (id(m), len(ids), ids[0] if ids else None, ids[-1] if ids else None)
+        if key == getattr(self, "_taxis_key", None):
+            return
+        self._taxis_key = key
+        eps = [(m.bar_meta.get(b) or {}).get("t0") for b in ids]
+        if len(eps) < 2 or any(e is None for e in eps):
+            self.taxis.set_epochs(None)          # falls back to plain bar numbers
+            return
+        spec = self.spec()
+        gap = 5.0 * float(spec["bar_size"]) if spec.get("bar_kind") == "time" else None
+        self.taxis.set_epochs(eps, gap)
+
     def _init_cross(self):
         pen = pg.mkPen("#6d7680", width=1, style=QtCore.Qt.PenStyle.DashLine)
         self._cv = pg.InfiniteLine(angle=90, pen=pen)
@@ -295,7 +315,8 @@ class FootprintPanel(ChartPanel):
     cross_x = cross_y = True
 
     def build(self):
-        pw = self._make_plot()
+        self.taxis = TimeAxis(orientation="bottom")
+        pw = self._make_plot(axisItems={"bottom": self.taxis})
         self.p.showGrid(x=False, y=True, alpha=0.2)
         self.p.getAxis("left").setWidth(54)
         self.fp_item = FootprintItem()
@@ -396,7 +417,10 @@ class FootprintPanel(ChartPanel):
         self.titlebar.label.setText("Footprint  %s %s/%s"
                                     % (s["symbol"], s["bar_kind"], s["bar_size"]))
         if m is None:
+            self.taxis.set_epochs(None)
+            self._taxis_key = None
             return
+        self._label_bar_times(m)
         c = self.cfg
         vw = m.vwap()
         self.vwap_line.setVisible(c["show_vwap"] and vw is not None)
@@ -1004,8 +1028,11 @@ class RegimePanel(ChartPanel):
     kind = "regime"
     title = "Regime"
 
+    fixed_y = True          # ER lives in [0, 1]; never auto-range it away
+
     def build(self):
-        pw = self._make_plot()
+        self.taxis = TimeAxis(orientation="bottom")
+        pw = self._make_plot(axisItems={"bottom": self.taxis})
         self.p.setYRange(0, 1, padding=0.03)
         self.p.setMouseEnabled(x=True, y=False)
         self.p.showGrid(x=False, y=True, alpha=0.15)
@@ -1040,9 +1067,94 @@ class RegimePanel(ChartPanel):
               "CHOP": "#c9ced4"}.get(r["core"], "#e6b450")
         pts = m.er_series(c["regime_window"])    # ER history
         self.rg_curve.setData([i for i, _e in pts], [e for _i, e in pts])
+        self._label_bar_times(m)
         self.titlebar.label.setText("Regime  %s" % r["core"])
         self.titlebar.label.setStyleSheet("color:%s; font-weight:600;" % fg)
         self.titlebar.set_note("ER %.2f  v%.0f" % (r["er"], r["rv_pct"]))
+
+
+# ============================================================
+#  Tick flash — shared by the DOM and the tape
+# ============================================================
+FLASH_SEC = 0.6
+BASE_ROLE = QtCore.Qt.ItemDataRole.UserRole + 7   # a cell's own background, restored after
+
+
+class Flasher:
+    """Fading highlights on table cells.
+
+    Keys name WHAT flashed — a price level, a trade — not where it is: rows move
+    as the book shifts and the tape scrolls, so every refresh calls begin_frame(),
+    place()s each key where it now sits, then paint(). Between refreshes a timer
+    keeps the fade going, but only while something is fading, and it touches only
+    those cells' backgrounds — never a table rebuild — then stops itself.
+
+    A cell that has its own background (the lit best bid/ask, a big print) stores
+    it in BASE_ROLE; the flash is mixed over it and it comes back afterwards."""
+
+    def __init__(self, table, secs=FLASH_SEC, peak=150):
+        self.table, self.secs, self.peak = table, secs, peak
+        self.active = {}                     # key -> (started, QColor)
+        self.cells = {}                      # key -> [(row, col)] in the current frame
+        self.timer = QtCore.QTimer(table)
+        self.timer.setInterval(40)
+        self.timer.timeout.connect(self.tick)
+
+    def start(self, key, color, now=None):
+        self.active[key] = (time.monotonic() if now is None else now, QtGui.QColor(color))
+        if not self.timer.isActive():
+            self.timer.start()
+
+    def begin_frame(self):
+        self.cells = {}
+
+    def place(self, key, cells):
+        if key in self.active:
+            self.cells[key] = cells
+
+    def clear(self):
+        self.active.clear()
+        self.cells.clear()
+        self.timer.stop()
+
+    def paint(self, now=None):
+        now = time.monotonic() if now is None else now
+        for key, (t0, col) in list(self.active.items()):
+            left = 1.0 - (now - t0) / self.secs
+            for r, c in self.cells.get(key, ()):
+                it = self.table.item(r, c)
+                if it is None:
+                    continue
+                base = it.data(BASE_ROLE)
+                if left <= 0:
+                    it.setData(QtCore.Qt.ItemDataRole.BackgroundRole, base)
+                else:
+                    it.setBackground(self._mix(base, col, left))
+            if left <= 0:
+                del self.active[key]
+                self.cells.pop(key, None)
+
+    def tick(self):
+        self.paint()
+        if not self.active:
+            self.timer.stop()
+
+    def _mix(self, base, col, strength):
+        a = self.peak / 255.0 * max(0.0, min(strength, 1.0))
+        if base is None:                     # translucent over whatever is behind
+            c = QtGui.QColor(col)
+            c.setAlpha(int(round(255 * a)))
+            return c
+        b = QtGui.QBrush(base).color()
+        return QtGui.QColor(int(b.red() + (col.red() - b.red()) * a),
+                            int(b.green() + (col.green() - b.green()) * a),
+                            int(b.blue() + (col.blue() - b.blue()) * a))
+
+
+def flash_on(panel):
+    """Flash only live, and only if the user has not turned it off. Replay is a
+    finished day: flashing it would animate nothing that is happening."""
+    return bool(panel.cfg.get("tick_flash", True) and getattr(panel.host, "live", False))
 
 
 # ============================================================
@@ -1058,6 +1170,9 @@ class DomPanel(Panel):
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(2, 2, 2, 2)
         self.dom = QtWidgets.QTableWidget(0, 6)
+        self.flash = Flasher(self.dom)
+        self._flash_prev = None              # lots per price at the last refresh
+        self._bbo_prev = None
         self.dom.setHorizontalHeaderLabels(["B.Freq", "B.Lot", "Bid", "Ask", "A.Lot", "A.Freq"])
         self.dom.verticalHeader().setVisible(False)
         self.dom.verticalHeader().setDefaultSectionSize(20)   # dense QT-style rows
@@ -1166,6 +1281,34 @@ class DomPanel(Panel):
         else:
             self._refresh_classic(m)
 
+    def _update_flash(self, cur, places, bb, ba):
+        """Both layouts end here. cur is lots per price now; places maps each
+        price to (row, size column, price column) in whichever layout drew it.
+        A level flashes green when it grew and red when it shrank; the best bid
+        or offer price cell pulses when the touch moves. A level that has only
+        just come into view is not a change, so it does not flash."""
+        if flash_on(self):
+            prev = self._flash_prev
+            if prev is not None:
+                for p, now in cur.items():
+                    was = prev.get(p)
+                    if was is not None and abs(now - was) >= 1:
+                        self.flash.start(("sz", p), BULL if now > was else BEAR)
+            if self._bbo_prev is not None:
+                pb, pa = self._bbo_prev
+                if bb is not None and bb != pb:
+                    self.flash.start(("px", bb), BULL)
+                if ba is not None and ba != pa:
+                    self.flash.start(("px", ba), BEAR)
+        else:
+            self.flash.clear()
+        self._flash_prev, self._bbo_prev = cur, (bb, ba)
+        self.flash.begin_frame()
+        for p, (r, scol, pcol) in places.items():
+            self.flash.place(("sz", p), [(r, scol)])
+            self.flash.place(("px", p), [(r, pcol)])
+        self.flash.paint()
+
     def _refresh_pro(self, m):
         """Quantower-style DOM: one centered ladder (asks above the spread row,
         bids below), depth bars, session-volume column, sum totals, BBO lit."""
@@ -1212,15 +1355,19 @@ class DomPanel(Panel):
         cur.update({p: v / 100 for p, v in m.book.asks.items()})
 
         self.dom.setRowCount(len(rows))
+        places = {}
         for r, (price, bf, bv, af, av) in enumerate(rows):
             is_ask = av is not None
+            places[price] = (r, 2 if is_ask else 0, 1)
             self.dom.setItem(r, 0, lot_item((bv or 0) / 100))
             pit = QtWidgets.QTableWidgetItem(format(price, ",.0f"))
             pit.setTextAlignment(ctr)
             pit.setForeground(BEAR if is_ask else BULL)
             if price == ba or price == bb:       # best bid & offer stand out
                 pit.setFont(bold)
-                pit.setBackground(ASK_BG if price == ba else BID_BG)
+                lit = ASK_BG if price == ba else BID_BG
+                pit.setBackground(lit)
+                pit.setData(BASE_ROLE, lit)      # so a pulse fades back to it
             self.dom.setItem(r, 1, pit)
             self.dom.setItem(r, 2, lot_item((av or 0) / 100))
             now = cur.get(price, 0)
@@ -1258,6 +1405,7 @@ class DomPanel(Panel):
                               % (rl[0], format(rl[1], ",.0f"), rl[2]))
             self.dom.setItem(r, 5, at)
         self._dom_prev = cur
+        self._update_flash(cur, places, bb, ba)
 
         tb, ta = sum(blots), sum(alots)
         tv = sum((m.vap[p]["buy"] + m.vap[p]["sell"]) / 100
@@ -1341,6 +1489,13 @@ class DomPanel(Panel):
             else:
                 for col in (3, 4, 5):
                     self.dom.setItem(i, col, QtWidgets.QTableWidgetItem(""))
+        # classic: bid size col 1 / price col 2 on the left, ask price col 3 /
+        # size col 4 on the right, one level per row on each side
+        cur = {p: (v or 0) / 100 for p, _f, v in bids + asks}
+        places = {p: (i, 1, 2) for i, (p, _f, _v) in enumerate(bids)}
+        places.update({p: (i, 4, 3) for i, (p, _f, _v) in enumerate(asks)})
+        self._update_flash(cur, places, bids[0][0] if bids else None,
+                           asks[0][0] if asks else None)
 
 
 # ============================================================
@@ -1356,6 +1511,11 @@ class TapePanel(Panel):
         lay = QtWidgets.QVBoxLayout(w)
         lay.setContentsMargins(2, 2, 2, 2)
         self.tape = QtWidgets.QTableWidget(0, 4)
+        self.flash = Flasher(self.tape, secs=0.8)
+        self._tape_src, self._tape_n = None, 0   # which trade list, how long last time
+        # size bar behind the quantity, scaled to Big>= and coloured per row by side
+        self._qty_bar = DepthBarDelegate("bid", BULL, self.tape)
+        self.tape.setItemDelegateForColumn(2, self._qty_bar)
         self.tape.setHorizontalHeaderLabels(["Time", "Price", "Qty", "Side"])
         self.tape.verticalHeader().setVisible(False)
         self.tape.horizontalHeader().setSectionResizeMode(
@@ -1387,19 +1547,56 @@ class TapePanel(Panel):
         bigfont = QtGui.QFont()
         bigfont.setBold(True)
         bigbg = QtGui.QColor(74, 62, 30)
+        # every other panel speaks header_units; the tape used to show raw shares
+        unit, head = (100, "Lots") if c["header_units"] == "lots" else (1, "Qty")
+        hi = self.tape.horizontalHeaderItem(2)
+        if hi is None or hi.text() != head:
+            self.tape.setHorizontalHeaderLabels(["Time", "Price", head, "Side"])
+        rgt = QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
+        UR = QtCore.Qt.ItemDataRole.UserRole
+        # Bars show size RELATIVE to what is on screen: the 95th-percentile print,
+        # so one giant fill cannot flatten the rest. Scaling to Big>= instead left
+        # every bar full on BUMI, where nearly every print clears 50 lots; Big>=
+        # keeps its own job -- the highlight, and a bolder bar.
+        qs = sorted(r["qty"] for r in recent)
+        ref = (qs[int(0.95 * (len(qs) - 1))] if qs else 0) or 1.0
         for i, r in enumerate(recent):
             isbig = r["qty"] >= big
+            side = r.get("side", "")
+            qty = QtWidgets.QTableWidgetItem(format(r["qty"] / unit, ",.0f"))
+            qty.setTextAlignment(rgt)
+            qty.setData(UR, min(r["qty"] / ref, 1.0))
+            qty.setData(UR + 1, isbig)
+            qty.setData(DepthBarDelegate.COLOR_ROLE, BULL if side == "buy" else BEAR)
             items = [QtWidgets.QTableWidgetItem(self.fmt_time(r, c["time_ms"])),
                      QtWidgets.QTableWidgetItem(format(r["price"], ",.0f")),
-                     QtWidgets.QTableWidgetItem(format(r["qty"], ",.0f")),
-                     QtWidgets.QTableWidgetItem(r.get("side", ""))]
-            items[3].setForeground(BULL if r.get("side") == "buy" else BEAR)
+                     qty,
+                     QtWidgets.QTableWidgetItem({"buy": "▲ buy", "sell": "▼ sell"}.get(side, side))]
+            items[3].setForeground(BULL if side == "buy" else BEAR)
             for j, it in enumerate(items):
                 if isbig:
                     it.setBackground(bigbg)
+                    it.setData(BASE_ROLE, bigbg)   # a flash fades back to the highlight
                     if j > 0:        # don't bold Time — bold text overflows the column
                         it.setFont(bigfont)
                 self.tape.setItem(i, j, it)
+
+        # New prints enter tinted by side. The first look at a trade list is
+        # history, not news, so it never flashes the whole tape at once.
+        if self._tape_src != id(m.trades):
+            self._tape_src, self._tape_n, fresh = id(m.trades), len(m.trades), 0
+        else:
+            fresh = max(0, len(m.trades) - self._tape_n)
+            self._tape_n = len(m.trades)
+        if flash_on(self):
+            for r in recent[:fresh]:
+                self.flash.start(("t", id(r)), BULL if r.get("side") == "buy" else BEAR)
+        else:
+            self.flash.clear()
+        self.flash.begin_frame()
+        for i, r in enumerate(recent):
+            self.flash.place(("t", id(r)), [(i, j) for j in range(4)])
+        self.flash.paint()
 
 
 # ============================================================
