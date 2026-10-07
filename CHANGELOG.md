@@ -10,10 +10,30 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
-### Changed — the liquidity heatmap, rebuilt to be readable
+## [3.1.0] - 2026-10-07
 
-Every problem below was confirmed against the real 2026-08-31 BUMI session, not the README
-preview, which is a synthetic random walk and hid the worst of them.
+Minor: new capability, nothing removed, and settings from 3.0.x migrate on first launch.
+Three pieces of work — a real watchlist, a memory footprint that stops growing, and a
+liquidity heatmap rebuilt to be readable. All of it was verified against the recorded
+2026-08-31 session and the test suites; none of it has yet run against a live market.
+
+### Added
+
+- **A real watchlist: the symbols you pick are the symbols you get.** The watched set is
+  now explicit state, persisted with the roster, and it — not the layout — decides what
+  the app subscribes to. `WatchlistPanel` gained `+` / `−` so you can watch a ticker
+  without dedicating a panel to it, and the session toolbar shows `watching N · charting M`
+  whenever those differ, because silence is what let six symbols become one.
+- Watching is deliberately cheap. Measured against the 2026-08-31 archive, the live
+  protobuf parse costs **20 µs/frame**, so one extra watched symbol is ~0.02 % of one core
+  even at the opening bell.
+- **`book_buffer`** (General): how many book snapshots to keep per symbol, default 4000.
+
+### Changed
+
+**The liquidity heatmap, rebuilt to be readable.** Every problem below was confirmed against
+the real 2026-08-31 BUMI session, not the README preview, which is a synthetic random walk
+and hid the worst of them.
 
 - **It reads clock time.** The x-axis was the column index — 0, 200, 400. `TimeAxis` puts
   ticks on round clock times (1/2/5/10/15/30 min) and labels them `HH:MM`, `HH:MM:SS` when
@@ -52,22 +72,26 @@ preview, which is a synthetic random walk and hid the worst of them.
   timestamps are parsed once, and bubble sizes are whole pixels. An idle refresh is now
   **0.56 ms**; one with a new column ~15 ms.
 
-### Fixed
+**Memory that stops growing.**
 
-- **The Watchlist's `+` / `−` buttons rendered blank.** `DARK_QSS` pads every `QPushButton`
-  14 px a side; at 26 px wide that left −4 px for a 12 px glyph. Found by looking at the
-  regenerated preview, and now checked against the live stylesheet in the suite.
-
-### Added
-
-- **A real watchlist: the symbols you pick are the symbols you get.** The watched set is
-  now explicit state, persisted with the roster, and it — not the layout — decides what
-  the app subscribes to. `WatchlistPanel` gained `+` / `−` so you can watch a ticker
-  without dedicating a panel to it, and the session toolbar shows `watching N · charting M`
-  whenever those differ, because silence is what let six symbols become one.
-- Watching is deliberately cheap. Measured against the 2026-08-31 archive, the live
-  protobuf parse costs **20 µs/frame**, so one extra watched symbol is ~0.02 % of one core
-  even at the opening bell.
+- **The replay buffer is bounded, so a long day no longer grows without limit.** The cap
+  is deliberately asymmetric, because the two event kinds are nothing alike. Measured on
+  the 2026-08-31 archive, book snapshots are **92 % of the buffer at ~5.5 KB each**, while
+  a whole session of trades is 8.7 MB — and nothing on screen reads an old book frame: the
+  DOM shows only the newest and the heatmap keeps its own bounded window. The footprint,
+  CVD, volume profile and tape, by contrast, need **every** trade of the session. So books
+  are capped and trades are never dropped. Replaying the real 2.3 h BUMI session, the
+  buffer falls from **82.2 MB to 24.8 MB** with every trade retained, and it stops growing
+  rather than merely growing slower. Trimming is counted and shown in `--debug` as
+  `books_trimmed=N`, because a trimmed buffer means a rebuilt heatmap starts later than
+  the session did and that should never be a surprise.
+- **Event retention is tiered, and this is what makes a long watchlist affordable.**
+  `self.events` is the replay buffer models rebuild from, and before the cap above it grew
+  without limit: measured with `tracemalloc`, a liquid symbol cost **~36 MB per
+  symbol-hour**, ~233 MB *each* over a 6.5 h session. Only symbols a visible panel is
+  drawing now earn a buffer at all; the rest get `_tally`, three counters, which is what
+  the watchlist table reads anyway. Charting a watched symbol starts its buffer from that
+  moment.
 
 ### Fixed
 
@@ -84,28 +108,9 @@ preview, which is a synthetic random walk and hid the worst of them.
   not say *when* — the crash had to be dated from the Windows event log instead.
   `install()` now stamps a dated, pid-tagged header the moment it arms, so even an access
   violation lands under a line that says which run it belongs to.
-
-- **`book_buffer`** (General): how many book snapshots to keep per symbol, default 4000.
-
-### Changed
-
-- **The replay buffer is bounded, so a long day no longer grows without limit.** The cap
-  is deliberately asymmetric, because the two event kinds are nothing alike. Measured on
-  the 2026-08-31 archive, book snapshots are **92 % of the buffer at ~5.5 KB each**, while
-  a whole session of trades is 8.7 MB — and nothing on screen reads an old book frame: the
-  DOM shows only the newest and the heatmap keeps its own bounded window. The footprint,
-  CVD, volume profile and tape, by contrast, need **every** trade of the session. So books
-  are capped and trades are never dropped. Replaying the real 2.3 h BUMI session, the
-  buffer falls from **82.2 MB to 24.8 MB** with every trade retained, and it stops growing
-  rather than merely growing slower. Trimming is counted and shown in `--debug` as
-  `books_trimmed=N`, because a trimmed buffer means a rebuilt heatmap starts later than
-  the session did and that should never be a surprise.
-- **Event retention is tiered, and this is what makes a long watchlist affordable.**
-  `self.events` is the replay buffer models rebuild from and it is never trimmed: measured
-  with `tracemalloc`, a liquid symbol costs **~36 MB per symbol-hour**, so a 6.5 h session
-  is ~233 MB *each*. Only symbols a visible panel is drawing now earn a buffer; the rest
-  get `_tally`, which is three counters and is what the watchlist table reads anyway.
-  Charting a watched symbol starts its buffer from that moment.
+- **The Watchlist's `+` / `−` buttons rendered blank.** `DARK_QSS` pads every `QPushButton`
+  14 px a side; at 26 px wide that left −4 px for a 12 px glyph. Found by looking at the
+  regenerated preview, and now checked against the live stylesheet in the suite.
 
 ## [3.0.1] - 2026-10-03
 
@@ -341,7 +346,8 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.0.1...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/silenccy/orderflow-station/compare/v3.0.1...v3.1.0
 [3.0.1]: https://github.com/silenccy/orderflow-station/compare/v3.0.0...v3.0.1
 [3.0.0]: https://github.com/silenccy/orderflow-station/compare/v2.0.0...v3.0.0
 [2.0.0]: https://github.com/silenccy/orderflow-station/compare/v1.0.0...v2.0.0
