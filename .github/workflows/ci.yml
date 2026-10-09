@@ -18,9 +18,11 @@ jobs:
         python-version: ["3.10", "3.12"]
 
     steps:
-      - uses: actions/checkout@v4
+      # v7 of both run on Node 24; v4/v5 ran on the deprecated Node 20 and put a
+      # warning on every run (latest versions checked against GitHub, 2026-10-09)
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip

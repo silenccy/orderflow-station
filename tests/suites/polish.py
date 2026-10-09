@@ -188,7 +188,8 @@ assert tape.tape.horizontalHeaderItem(2).text() == "Lots"
 newest = tm.trades[-1]
 q = tape.tape.item(0, 2)
 assert q.text() == format(newest["qty"] / 100, ",.0f"), (q.text(), newest["qty"])
-big = live.big_lots() * 100
+bl = live.big_lots("ASII", tm)            # per stock; None while auto warms up
+big = bl * 100 if bl else float("inf")
 UR = QtCore.Qt.ItemDataRole.UserRole
 shown = tm.trades[-live.cfg["tape_rows"]:]
 qs = sorted(r["qty"] for r in shown)

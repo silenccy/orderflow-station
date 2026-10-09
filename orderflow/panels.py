@@ -1548,7 +1548,9 @@ class TapePanel(Panel):
         self.titlebar.label.setText("Trade tape  %s" % self.spec()["symbol"])
         recent = m.trades[-c["tape_rows"]:][::-1]
         self.tape.setRowCount(len(recent))
-        big = self.host.big_lots() * 100         # lots -> shares
+        # this stock's own threshold (override or auto); None = auto still warming up
+        big_lots = self.host.big_lots(self.spec()["symbol"], m)
+        big = big_lots * 100 if big_lots else float("inf")   # lots -> shares
         bigfont = QtGui.QFont()
         bigfont.setBold(True)
         bigbg = QtGui.QColor(74, 62, 30)

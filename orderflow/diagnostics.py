@@ -24,7 +24,7 @@ import threading
 import traceback
 from datetime import datetime
 
-from .paths import CAPTURE_LOCK, DATA_DIR
+from .paths import CAPTURE_LOCK, CAPTURE_LOG, DATA_DIR
 
 CRASH_LOG = DATA_DIR / "crash.log"
 LAUNCH_LOG = DATA_DIR / "launch.log"
@@ -180,6 +180,73 @@ def _tail(path, n=8):
     return lines[-n:] or ["(empty)"]
 
 
+def recorded_today(day=None):
+    """What today's session left on disk -- the part of the report worth pasting
+    after the close. Every archive row starts with its ISO recv_time, then the
+    symbol, so a plain streaming pass counts today's rows per symbol.
+
+    Crashes are attributed by the dated 'faulthandler armed' headers: a native
+    dump belongs to the run whose header precedes it, so only today's runs count."""
+    from .paths import BOOK_CSV, GAPS_CSV, TRADES_CSV
+    day = day or datetime.now().strftime("%Y-%m-%d")
+    out = {"day": day, "trades": {}, "book": {}, "gaps": 0, "gap_sec": 0.0,
+           "launches": 0, "crashed_runs": 0, "errors": 0, "capture_tail": []}
+
+    def per_symbol(path):
+        counts = {}
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                next(f, None)                                   # header
+                for ln in f:
+                    if ln.startswith(day):
+                        sym = ln.split(",", 2)[1]
+                        counts[sym] = counts.get(sym, 0) + 1
+        except OSError:
+            pass
+        return counts
+
+    out["trades"], out["book"] = per_symbol(TRADES_CSV), per_symbol(BOOK_CSV)
+    try:
+        with open(GAPS_CSV, encoding="utf-8", errors="replace") as f:
+            next(f, None)
+            for ln in f:
+                if ln.startswith(day):
+                    out["gaps"] += 1
+                    try:
+                        out["gap_sec"] += float(ln.split(",")[5] or 0)
+                    except (IndexError, ValueError):
+                        pass
+    except OSError:
+        pass
+    # Count crashed RUNS, not fatal lines: one dump can report its fault twice
+    # (12 runs, 23 such lines on 2026-10-09), which would overstate it.
+    try:
+        today_run = fatal = False
+        me = "(pid %d)" % os.getpid()      # Diagnose.bat arms a header too: not a launch
+        lines = CRASH_LOG.read_text(encoding="utf-8", errors="replace").splitlines()
+        for ln in lines + [None]:                     # None closes the last run
+            if ln is None or "faulthandler armed" in ln:
+                out["crashed_runs"] += today_run and fatal          # close the previous run
+                if ln is None:
+                    break
+                today_run, fatal = ln.startswith("[" + day) and me not in ln, False
+                out["launches"] += today_run
+            elif "] unhandled exception" in ln and ln.startswith("[" + day):
+                out["errors"] += 1
+            # startswith, not `in`: the armed header's own explanatory line quotes
+            # both phrases, and matching it marked every run as crashed
+            elif ln.startswith("Windows fatal exception") or ln.startswith("Fatal Python error"):
+                fatal = True
+    except OSError:
+        pass
+    try:
+        out["capture_tail"] = [ln for ln in CAPTURE_LOG.read_text(
+            encoding="utf-8", errors="replace").splitlines() if ln.strip()][-6:]
+    except OSError:
+        pass
+    return out
+
+
 def doctor():
     """Everything worth knowing when it will not start. Returns text; every probe
     is guarded so one broken thing still lets the rest report."""
@@ -221,6 +288,25 @@ def doctor():
         line("frame file", of_startup.newest_frame() or "(none)")
     except Exception as e:
         line("token", "probe failed: %r" % e)
+
+    o.write("\n[today]\n")
+    try:
+        t = recorded_today()
+        line("date", t["day"])
+        syms = sorted(set(t["trades"]) | set(t["book"]))
+        if not syms:
+            line("recorded", "nothing today")
+        for sym in syms:
+            line("recorded %s" % sym, "%s trades, %s book rows"
+                 % (format(t["trades"].get(sym, 0), ","), format(t["book"].get(sym, 0), ",")))
+        line("feed gaps", "%d (%.0f s lost)" % (t["gaps"], t["gap_sec"]))
+        line("app launches", t["launches"])
+        line("crashes", "%d of %d runs crashed, %d contained errors"
+             % (t["crashed_runs"], t["launches"], t["errors"]))
+        for i, ln in enumerate(t["capture_tail"]):
+            line("capture.log" if i == 0 else "", ln)
+    except Exception as e:
+        line("today", "probe failed: %r" % e)
 
     o.write("\n[qt]\n")
     line("QT_QPA_PLATFORM", os.environ.get("QT_QPA_PLATFORM") or "(unset, native)")

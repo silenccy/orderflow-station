@@ -368,7 +368,7 @@ which group the symbol and bar controls drive.
 | **Follow** | auto-scroll to new bars; panning back into history switches it off |
 | **↔ Measure** | click two points on a footprint for ticks, %, elapsed time and the volume traded between them |
 | **Δ cells** | switch cluster cells to delta heat |
-| **Big≥ (lots)** | highlight threshold for large prints in the tape |
+| **Big≥ (lots)** | which prints get the gold highlight in the tape, **per stock**. `auto · N` (the default) means that stock's own top 5% of prints — N is the number auto chose. Type a number to override it for the active stock only; `0` goes back to auto. |
 
 Moving the cursor over a chart puts a **crosshair** on every panel in the same link group,
 and the footprint's title bar reads out the price plus that cell's bid, ask, delta and total.

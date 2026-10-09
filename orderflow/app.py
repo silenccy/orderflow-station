@@ -239,6 +239,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self._last_diag_t = 0.0
         self._derived = {}           # symbol -> running last/trades/vol
         self._summaries = {}         # symbol -> latest summary dict
+        self._big_overrides = {}     # symbol -> your Big>= lots (absent = auto)
+        self._big_auto = {}          # symbol -> (prints seen, auto lots) cache
         self._book_counts = {}       # symbol -> book frames held (see _trim_books)
         self._book_scan = {}         # symbol -> how far we have counted already
         self._books_trimmed = 0      # lifetime, for --debug
@@ -324,9 +326,15 @@ class MainWindow(QtWidgets.QMainWindow):
         tb.addWidget(self.delta_cells)
         tb.addWidget(QtWidgets.QLabel("  Big≥(lots): "))
         self.big_spin = QtWidgets.QSpinBox()
-        self.big_spin.setRange(1, 1000000)
-        self.big_spin.setValue(50)
-        self.big_spin.editingFinished.connect(self.refresh)
+        self.big_spin.setRange(0, 1000000)       # 0 = auto, per stock
+        self.big_spin.setSpecialValueText("auto")
+        self.big_spin.setValue(0)
+        self.big_spin.setMinimumWidth(124)       # room for "auto · 12,400"
+        self.big_spin.setToolTip(
+            "Prints at or above this many lots get the gold highlight in the tape.\n"
+            "auto = this stock's own top 5% of prints (the number shown).\n"
+            "Type a number to set it for THIS stock only; 0 goes back to auto.")
+        self.big_spin.editingFinished.connect(self._big_edited)
         tb.addWidget(self.big_spin)
 
         center = QtWidgets.QToolButton()
@@ -489,8 +497,71 @@ class MainWindow(QtWidgets.QMainWindow):
     def cell_mode(self):
         return "delta" if self.delta_cells.isChecked() else "bidask"
 
-    def big_lots(self):
-        return self.big_spin.value()
+    BIG_PCTL = 0.95          # auto: a stock's own 95th-percentile print
+    BIG_MIN_PRINTS = 30      # below this, auto has nothing honest to say
+
+    def _active_symbol(self):
+        g = self.group_combo.currentText() or "A"
+        return (self.groups.get(g) or {}).get("symbol") or ""
+
+    def big_lots(self, symbol=None, model=None):
+        """Lots at or above which a print counts as big for THIS stock.
+
+        Your number for that stock if you set one; otherwise auto, its own
+        95th-percentile print over the session. It used to be one number for
+        every stock -- 50 lots -- which turned the whole BUMI tape gold, where
+        nearly every print clears it, and left ASII's almost bare. None while
+        auto has fewer than 30 prints to go on: no highlight beats a guess."""
+        symbol = symbol or self._active_symbol()
+        own = self._big_overrides.get(symbol)
+        if own:
+            return own
+        if model is None and symbol == self._active_symbol():
+            model = self._active_model()
+        return self._big_auto_lots(symbol, model)
+
+    def _big_auto_lots(self, symbol, model):
+        trades = getattr(model, "trades", None) or []
+        n = len(trades)
+        hit = self._big_auto.get(symbol)
+        # A percentile over a whole session moves slowly: re-sort only after
+        # 2 % more prints (at least 30), not on every refresh.
+        if hit and hit[0] <= n < hit[0] + max(30, hit[0] // 50):
+            return hit[1]
+        if n < self.BIG_MIN_PRINTS:
+            val = None
+        else:
+            lots = sorted(r["qty"] / 100.0 for r in trades)
+            val = max(1, int(round(lots[int(self.BIG_PCTL * (n - 1))])))
+        self._big_auto[symbol] = (n, val)
+        return val
+
+    def _sync_big_box(self):
+        """Show the active stock's threshold: its override, or 'auto · N' with
+        the number auto chose, so it is never a mystery."""
+        sym = self._active_symbol()
+        auto = self._big_auto_lots(sym, self._active_model())
+        txt = "auto · %s" % format(auto, ",") if auto else "auto · warming up"
+        own = self._big_overrides.get(sym, 0)
+        self.big_spin.blockSignals(True)
+        try:
+            if self.big_spin.specialValueText() != txt:
+                self.big_spin.setSpecialValueText(txt)
+            if not self.big_spin.hasFocus() and self.big_spin.value() != own:
+                self.big_spin.setValue(own)      # never fight you mid-edit
+        finally:
+            self.big_spin.blockSignals(False)
+
+    def _big_edited(self):
+        sym = self._active_symbol()
+        if not sym:
+            return
+        v = self.big_spin.value()
+        if v:
+            self._big_overrides[sym] = v
+        else:
+            self._big_overrides.pop(sym, None)   # 0 = back to auto
+        self.refresh()
 
     def measure_active(self):
         return self._measure
@@ -798,6 +869,7 @@ class MainWindow(QtWidgets.QMainWindow):
         finally:
             for w in (self.sym_combo, self.bar_combo, self.size_spin):
                 w.blockSignals(False)
+        self._sync_big_box()                     # Big>= belongs to the active stock
 
     def _on_group_source_changed(self, *_):
         g = self.group_combo.currentText() or "A"
@@ -842,6 +914,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 p.refresh()          # another repaints on its visibilityChanged
         self._refresh_summary()
         self._refresh_regime_chip()
+        self._sync_big_box()                     # auto moves as prints arrive
         g = self.group_combo.currentText() or "A"
         m = self._active_model()
         if m is not None:
@@ -1101,16 +1174,18 @@ class MainWindow(QtWidgets.QMainWindow):
         if s.value("cell_mode") == "delta":
             self.delta_cells.setChecked(True)
         try:
-            bg = s.value("big_lots")
-            if bg is not None:
-                self.big_spin.setValue(int(bg))
-        except (TypeError, ValueError):
-            pass
+            raw = s.value("big_lots_by_symbol")
+            data = json.loads(raw) if raw else {}
+            self._big_overrides = {str(k).upper(): int(v) for k, v in data.items()
+                                   if int(v) > 0}
+        except (TypeError, ValueError, AttributeError):
+            self._big_overrides = {}
 
     def _save_settings(self):
         s = self.settings
         s.setValue("cell_mode", self.cell_mode())
-        s.setValue("big_lots", self.big_spin.value())
+        s.setValue("big_lots_by_symbol", json.dumps(self._big_overrides))
+        s.remove("big_lots")                     # the old one-number-for-all setting
         for k, v in self.cfg.items():
             s.setValue("cfg/%s" % k, v)
         for p in self.panels:

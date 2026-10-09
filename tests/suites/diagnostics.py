@@ -104,4 +104,59 @@ for want in ("[interpreter]", "[paths]", "[session]", "[qt]", "DATA_DIR",
     assert want in rep, "doctor() missing %r" % want
 print("PASS: doctor() reports interpreter, paths, session, qt and saved startup")
 
+# ---- 6. [today]: what the session left on disk, for the post-close paste ---
+# A fixed past date, so neither the clock nor the crash.log lines written above
+# (dated today) can leak into the counts.
+from orderflow.paths import BOOK_CSV, CAPTURE_LOG, GAPS_CSV, TRADES_CSV  # noqa: E402
+
+DAY, OTHER = "2026-01-15", "2026-01-14"
+
+
+def write(path, header, rows):
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(header + "\n" + "".join(r + "\n" for r in rows))
+
+
+write(TRADES_CSV, "recv_time,symbol,trade_time,price,qty,lots,value,trade_id,flag",
+      ["%sT09:0%d:00,ASII,x,4800,100,1,0,%d,1" % (DAY, i, i) for i in range(3)]
+      + ["%sT09:1%d:00,BUMI,x,230,100,1,0,%d,1" % (DAY, i, 10 + i) for i in range(2)]
+      + ["%sT09:0%d:00,ASII,x,4800,100,1,0,%d,1" % (OTHER, i, 20 + i) for i in range(4)])
+write(BOOK_CSV, "recv_time,symbol,side,price,freq,value",
+      ["%sT09:00:0%d,ASII,BID,4795,3,300" % (DAY, i) for i in range(5)]
+      + ["%sT09:00:0%d,BUMI,BID,229,3,300" % (OTHER, i) for i in range(2)])
+write(GAPS_CSV, "recv_time,symbol,kind,started,ended,seconds,attempts,detail",
+      ["%sT11:00:00,ASII,disconnect,a,b,41.5,2,ConnectionClosed" % DAY,
+       "%sT11:00:00,ASII,disconnect,a,b,9.0,1,x" % OTHER])
+def armed(stamp, pid):
+    """The header exactly as install() writes it -- including the explanatory
+    line that quotes 'Windows fatal exception', which once fooled the count."""
+    return ("=" * 72 + "\n[%s] faulthandler armed (pid %d)\n" % (stamp, pid)
+            + "  any 'Windows fatal exception' / 'Fatal Python error' block below\n"
+            + "  belongs to THIS run until the next armed line.\n" + "-" * 72 + "\n")
+
+
+with open(CRASH, "a", encoding="utf-8") as f:
+    f.write(armed(OTHER + "T08:58:00", 1)
+            + "Windows fatal exception: access violation\n"
+            + armed(DAY + "T08:59:00", 2)
+            + "Windows fatal exception: access violation\n"
+            + "\n"                                   # dumps contain blank lines
+            + "Windows fatal exception: access violation\n"   # and can report twice
+            + "[%sT10:00:00] unhandled exception in Boom.paint (pid 2)\n" % DAY
+            + armed(DAY + "T10:30:00", 3))           # a run that did NOT crash
+CAPTURE_LOG.write_text("".join("[1%d:00:00] line %d\n" % (i % 10, i) for i in range(8)),
+                       encoding="utf-8")
+
+t = diag.recorded_today(DAY)
+assert t["trades"] == {"ASII": 3, "BUMI": 2}, t["trades"]
+assert t["book"] == {"ASII": 5}, t["book"]
+assert t["gaps"] == 1 and abs(t["gap_sec"] - 41.5) < 1e-9, (t["gaps"], t["gap_sec"])
+assert t["launches"] == 2, "two runs armed on %s, got %d" % (DAY, t["launches"])
+assert t["crashed_runs"] == 1, \
+    "one run crashed that day (its dump reports twice, across a blank line): %d" % t["crashed_runs"]
+assert t["errors"] == 1, t["errors"]
+assert len(t["capture_tail"]) == 6 and t["capture_tail"][-1].endswith("line 7")
+assert "[today]" in diag.doctor(), "doctor() must print the [today] section"
+print("PASS: [today] counts rows per symbol, gaps, launches and crashes for one day")
+
 print("\nALL PASS")

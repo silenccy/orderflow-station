@@ -10,6 +10,34 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Changed
+
+- **"Big ≥" is per stock, and automatic.** It was one number for every stock — 50 lots —
+  and it drives the tape's gold big-print highlight. On the recorded 2026-08-31 session
+  that lit **46.8 %** of BUMI's prints and 8.6 % of ASII's: a highlight on half the tape
+  says nothing. Each stock now gets its own threshold: your number if you set one for it,
+  otherwise **auto**, its own 95th-percentile print, so roughly its top 5 % — 5.0 % of
+  BUMI's prints and 5.4 % of ASII's on the same session. The box shows `auto · N` with the
+  number auto chose, follows the active stock, and a number typed into it applies to that
+  stock only (0 goes back to auto). Under 30 prints auto highlights nothing rather than
+  guess. The old single `big_lots` setting is dropped; it held the untouched default.
+- **CI runs on Node 24.** `actions/checkout` and `actions/setup-python` move from v4/v5,
+  which run on the deprecated Node 20 and warned on every run, to v7 (latest, checked
+  against GitHub; the inputs the workflow uses are unchanged).
+
+### Added
+
+- **A `[today]` section in Diagnose.bat** (`--doctor`): rows recorded today per symbol,
+  feed gaps, app launches, how many of them crashed, contained paint errors, and the last
+  lines of `capture.log` — after the close, one copy-paste reports the session. Crashes are
+  counted as runs, not fatal lines (one dump can report its fault twice), and only lines
+  that *start* a fault count: the dated header's own explanatory line quotes the same
+  words, and an early version of this count was fooled by it into calling every run a
+  crash. The test now writes headers exactly as the app does.
+- **`tests/suites/big_prints.py`** — two stocks with very different print sizes get their
+  own thresholds and each lights about 5 % of its prints; overrides are per stock, persist,
+  and hand back to auto; the tape lights its own big prints, not all of them.
+
 ## [3.2.2] - 2026-10-09
 
 Patch: fixes only. Ticking "Also record to disk" recorded nothing -- the chart won a
