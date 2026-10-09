@@ -45,8 +45,9 @@ def fresh(name, symbols=SIX, roster=None):
     s.clear()
     if roster is not None:
         s.setValue("panels/roster", json.dumps(roster))
-    return app_mod.MainWindow({}, "time", 60, symbols, live=True,
-                              persist=False, settings=s), s
+    w = app_mod.MainWindow({}, "time", 60, symbols, live=True, persist=False, settings=s)
+    w.start_live()          # feeds start here, never during construction (3.2.2)
+    return w, s
 
 
 def trade(sym, px=100.0, qty=500.0):

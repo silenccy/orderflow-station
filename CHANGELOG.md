@@ -10,6 +10,54 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **"Also record to disk" recorded nothing.** On 2026-10-09 it was ticked for two live
+  sessions and `book.csv`/`trades.csv` stayed untouched since 31 Aug. Reproduced offline,
+  three failures stacked:
+  - *a race for the writer lock.* The dialog launched the recorder and `start_live()` ran
+    at once; the recorder needs a second or two to start Python and claim the lock, so the
+    chart found it free and claimed it as `chart`, and the recorder then refused to run.
+    Recording requested from the dialog now always belongs to the recorder — the chart
+    stays a reader (`chart_writes()`), which is also the writer worth having: it survives
+    the window crashing, and that day the window crashed twice.
+  - *feeds without a sink.* The roster is restored while the window is being built, and
+    that used to start every feed right then — before `start_live()` had decided who
+    writes or created the sink. So a writing chart's feeds all carried `sink=None` and
+    wrote nothing. Feeds now start in `start_live()`, after that decision.
+  - *a refusal nobody could see.* The recorder printed its refusal to stderr only; started
+    from the app it runs detached under `pythonw`, where stderr goes nowhere. Early exits
+    now also go to `capture.log`, and the window's "recorder stopped immediately" line
+    quotes them.
+- **Stopping a feed in its first instant was ignored.** `FeedThread.stop()` only cancelled
+  if the thread's event loop was already running, so a feed retired right after starting —
+  a window closed just after launch, a quick watchlist +/−, the restart when recording
+  ownership changes — ran on, and at exit Qt aborted with *QThread: Destroyed while thread
+  is still running*. Reproduced directly: 0 of 1 such stops honoured before, 40 of 40
+  after. The request is now a flag `run()` checks as soon as its loop exists, plus a cancel
+  queued on that loop if it is already there.
+- **The tape and footprint could lag a quiet symbol by seconds.** The feed thread handed
+  events to the window only when a *new* event arrived more than 100 ms after the last
+  hand-off, so the tail of every burst waited for that symbol's next event — on 31 Aug ASII
+  averaged one book frame per ~12 s. It now flushes on a 100 ms clock. Found by the new
+  recording test: 12 trades sent, 1 reached the chart.
+
+### Added
+
+- **`tests/suites/recording.py`** — the first check that recording actually records:
+  trades in the real wire format, through the real feed thread, parser and CSV sink, with
+  only the websocket faked, must land in `trades.csv` exactly once across reconnects. Also
+  pins who writes, that feeds carry the sink, that the dialog path leaves the lock for the
+  recorder, and that a refusal reaches `capture.log` and the window. Earlier suites checked
+  lock ownership; none ever looked for a row on disk.
+- `tests/suites/feed_lifetime.py` gains the stop-in-the-first-instant check.
+
+### Not explained
+
+- The 2026-10-09 lock listed ASII, BUMI, CUAN and TLKM where the Start dialog had ASII and
+  TLKM. Neither the saved dialog choice nor the roster reproduces it today. If it recurs it
+  is now visible at once: the title reads `ASII +3` and the toolbar `watching 4 · charting N`.
+
 ## [3.2.1] - 2026-10-09
 
 Patch: fixes only. Pressing Center could crash the app -- and so, it turns out, could

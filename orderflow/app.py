@@ -87,25 +87,45 @@ class FeedThread(QtCore.QThread):
         self.backoff_max = float(backoff_max)
         self._loop = None
         self._task = None
+        self._stop_requested = False   # see stop(): survives the start-up gap
 
     async def _pump(self):
+        """Batch events to the GUI every 100 ms, on a clock.
+
+        It used to flush only when a NEW event arrived more than 100 ms after
+        the last flush, so the tail of every burst waited for the symbol's next
+        event -- on a quiet name (ASII averaged one book frame per ~12 s on
+        31 Aug) the tape and footprint could sit seconds behind with nothing to
+        say so. The recording test caught it: 12 trades, 1 reached the chart."""
         import asyncio
-        buf, last = [], 0.0
-        loop = asyncio.get_event_loop()
-        async for ev in of_feed.live_feed(self.symbol, persist=self.sink is not None,
-                                          sink=self.sink, reconnect=self.reconnect,
-                                          backoff_max=self.backoff_max):
-            if ev[0] == "status":
-                self.status.emit(self.symbol, ev[1])
-                continue
-            buf.append(ev)
-            now = loop.time()
-            if now - last > 0.1:
-                self.batch.emit(self.symbol, buf)
-                buf = []
-                last = now
-        if buf:
-            self.batch.emit(self.symbol, buf)
+        buf = []
+
+        def flush():
+            if buf:
+                self.batch.emit(self.symbol, list(buf))   # a copy: queued across threads
+                buf.clear()
+
+        async def every_100ms():
+            while True:
+                await asyncio.sleep(0.1)
+                flush()
+
+        ticker = asyncio.ensure_future(every_100ms())
+        try:
+            async for ev in of_feed.live_feed(self.symbol, persist=self.sink is not None,
+                                              sink=self.sink, reconnect=self.reconnect,
+                                              backoff_max=self.backoff_max):
+                if ev[0] == "status":
+                    self.status.emit(self.symbol, ev[1])
+                    continue
+                buf.append(ev)
+        finally:
+            ticker.cancel()
+            try:
+                await ticker                   # reap it, or asyncio logs a pending task
+            except BaseException:
+                pass
+            flush()
 
     def _explain(self, e):
         """Turn a feed exception into something worth reading in the status bar."""
@@ -118,6 +138,8 @@ class FeedThread(QtCore.QThread):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
         self._task = self._loop.create_task(self._pump())
+        if self._stop_requested:               # stop() came before the loop existed
+            self._task.cancel()
         try:
             self._loop.run_until_complete(self._task)
         except asyncio.CancelledError:
@@ -132,8 +154,23 @@ class FeedThread(QtCore.QThread):
             self._loop.close()
 
     def stop(self):
-        if self._loop and self._task and self._loop.is_running():
-            self._loop.call_soon_threadsafe(self._task.cancel)
+        """Ask the feed to finish. Safe at ANY moment after start().
+
+        It used to cancel only if the thread's event loop was already running,
+        and silently did nothing otherwise -- so a feed stopped in its first
+        instant (a window closed right after launch, a watchlist +/- in quick
+        succession, the restart when recording ownership changes) ran on, and
+        at exit Qt aborted: 'QThread: Destroyed while thread is still running'.
+        Now the request is a flag run() checks as soon as its loop exists, plus
+        a cancel queued on that loop if it is already there; between them there
+        is no gap for a stop to fall into."""
+        self._stop_requested = True
+        loop, task = self._loop, self._task
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:               # loop already closed: finished anyway
+                pass
 
 
 # ============================================================
@@ -194,6 +231,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self._persist = persist
         self._sink = None
         self._holds_lock = False     # did THIS window take the writer lock?
+        self._live_started = False   # feeds wait for start_live() -- see _sync_feeds
         self._rec_asked_t = None      # when Record was pressed (to catch instant death)
         self._next_uid = 1
         self._dirty = False
@@ -1179,7 +1217,8 @@ class MainWindow(QtWidgets.QMainWindow):
                 if waited > 4.0:
                     self._rec_asked_t = None
                     why = next((ln for ln in reversed(of_capture.tail_log(25))
-                                if "ENDED" in ln or "failed" in ln or "No parseable" in ln),
+                                if "ENDED" in ln or "failed" in ln or "No parseable" in ln
+                                or "refusing" in ln or "not 4-letter" in ln),
                                None)
                     self.status_lbl.setText(
                         "   recorder stopped immediately — %s"
@@ -1322,12 +1361,18 @@ class MainWindow(QtWidgets.QMainWindow):
             self.diag_timer = QtCore.QTimer(self)
             self.diag_timer.timeout.connect(lambda: self._refresh_diag(to_stderr=True))
             self.diag_timer.start(3000)
-        self._sync_feeds()
+        self._live_started = True                # feeds may start now: the sink, if
+        self._sync_feeds()                       # any, exists and they will carry it
 
     def _sync_feeds(self):
         """One feed thread per symbol actually on screen; stopped when the last
-        panel referencing it goes away."""
-        if not self.live:
+        panel referencing it goes away.
+
+        Not before start_live(). The roster is restored during construction and
+        used to start every feed right then -- before start_live() had decided
+        whether this window writes and created its sink -- so a writing chart's
+        feeds all carried sink=None and wrote nothing at all."""
+        if not self.live or not self._live_started:
             return
         want = set(self._wanted_symbols())
         for sym in list(self.feeds):
@@ -1430,6 +1475,21 @@ class MainWindow(QtWidgets.QMainWindow):
 # ============================================================
 #  Entry point
 # ============================================================
+def chart_writes(args, want_record):
+    """Does THIS window write the archive itself?
+
+    Never when the Start dialog asked to record. That launches the separate
+    recorder, and it used to race this window: the recorder needs a second or
+    two to start Python and claim the lock, start_live() ran at once, found the
+    lock free and claimed it as 'chart' -- and the recorder then refused to run.
+    On 2026-10-09 that left a chart holding the lock with feeds that wrote
+    nothing, and a refusal nobody saw. The recorder is the writer worth having:
+    it survives this window crashing, which this window, by definition, cannot.
+
+    Otherwise only a plain `--live` run writes (not --view-only, not --shot)."""
+    return bool(args.live and not args.shot and not args.view_only and not want_record)
+
+
 def main():
     ap = argparse.ArgumentParser(description="IDX orderflow workstation")
     ap.add_argument("--version", action="version",
@@ -1541,7 +1601,7 @@ def main():
             if sym:
                 events.setdefault(sym, []).append(ev)
 
-    persist = bool(args.live and not args.shot and not args.view_only)
+    persist = chart_writes(args, want_record)
     if persist and len(syms) > 1:
         print("multi-symbol live: writing CSVs from the chart is risky beside the "
               "capture daemon — pass --view-only unless this is the only writer",
@@ -1569,8 +1629,8 @@ def main():
         print("wrote %s" % args.shot)
         return
 
-    if want_record:            # dialog asked for recording: daemon first, so
-        win._start_daemon()    # start_live() then correctly sees it and goes view-only
+    if want_record:            # the recorder writes; this window is view-only
+        win._start_daemon()    # (chart_writes) -- see there for why it must be
 
     if args.live:
         win.start_live()

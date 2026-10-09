@@ -287,19 +287,22 @@ def main():
 
     argv = [a for a in sys.argv[1:] if not a.startswith("-")]
     symbols = [a.upper() for a in argv] or [SYMBOL]
+    # Early exits go to capture.log as well as stderr. Started from the app the
+    # recorder runs detached under pythonw, where stderr goes nowhere -- so on
+    # 2026-10-09 its refusal vanished and recording silently never happened.
     bad = [s for s in symbols if len(s) != 4 or not s.isalpha()]
     if bad:
-        print("not 4-letter tickers: %s" % ", ".join(bad), file=sys.stderr)
+        log("not 4-letter tickers: %s" % ", ".join(bad), err=True)
         sys.exit(2)
     symbols = list(dict.fromkeys(symbols))   # dedupe, keep order
 
     alive, info = writer_status()
     if alive:                                # the one-writer rule, enforced
-        print("refusing to start: %s is already recording %s (pid %s).\n"
-              "Stop it first with:  orderflow-capture --stop"
-              % (info.get("owner", "another writer"),
-                 ", ".join(info.get("symbols") or []) or "?", info.get("pid", "?")),
-              file=sys.stderr)
+        log("refusing to start: %s is already recording %s (pid %s) -- "
+            "stop it first with: orderflow-capture --stop"
+            % (info.get("owner", "another writer"),
+               ", ".join(info.get("symbols") or []) or "?", info.get("pid", "?")),
+            err=True)
         sys.exit(3)
     clear_stop()                             # a leftover flag would stop us instantly
     try:

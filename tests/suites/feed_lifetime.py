@@ -43,10 +43,12 @@ class SlowFeed(QtCore.QThread):
         self._cancel.set()
 
 
+RealFeed = app_mod.FeedThread       # kept for section 4
 app_mod.FeedThread = SlowFeed
 
 win = app_mod.MainWindow({}, "time", 60, ["ASII"], live=True, persist=False,
                          settings=SETTINGS)
+win.start_live()            # feeds start here, never during construction (3.2.2)
 
 # ---- 1. a symbol leaving the wanted set must be joined, not just asked to stop
 win._wanted_symbols = lambda: ["ASII", "BBCA"]
@@ -75,6 +77,39 @@ for th in SlowFeed.live:
     th.wait(3000)
     assert not th.isRunning(), "%s outlived shutdown" % th.symbol
 print("PASS: every feed joined at shutdown")
+
+# ---- 4. stop() in the first instant after start() is honoured -------------
+# It used to cancel only if the thread's loop was already running and silently
+# did nothing otherwise; the thread ran on and Qt aborted at exit with
+# "QThread: Destroyed while thread is still running". Real FeedThread here,
+# with a websocket that drops at once so the feed sits in its reconnect loop.
+import websockets  # noqa: E402
+from orderflow import feed as of_feed  # noqa: E402
+
+app_mod.FeedThread = RealFeed   # the real class again
+
+
+class _DropWS:
+    subprotocol = "web"
+    async def send(self, d): pass
+    async def recv(self): raise websockets.ConnectionClosed(None, None)
+
+
+class _DropConnect:
+    def __init__(self, *a, **k): pass
+    async def __aenter__(self): return _DropWS()
+    async def __aexit__(self, *a): return False
+
+
+of_feed.websockets.connect = _DropConnect
+finished = 0
+for _ in range(25):
+    th = RealFeed("ASII", None, reconnect=True)
+    th.start()
+    th.stop()                                    # before its loop can exist
+    finished += bool(th.wait(3000))
+assert finished == 25, "stop() right after start() was ignored %d of 25 times" % (25 - finished)
+print("PASS: stop() immediately after start() honoured 25/25 times")
 
 SETTINGS.clear()
 print()
