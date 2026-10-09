@@ -10,6 +10,14 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+## [3.2.2] - 2026-10-09
+
+Patch: fixes only. Ticking "Also record to disk" recorded nothing -- the chart won a
+race for the writer lock, its feeds had no sink, and the recorder's refusal went
+nowhere. Reproduced offline and fixed; the first test that looks for rows on disk
+comes with it. Recording through a live market is still to be confirmed at the next
+session. Settings and files are unchanged.
+
 ### Fixed
 
 - **"Also record to disk" recorded nothing.** On 2026-10-09 it was ticked for two live
@@ -498,7 +506,8 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.2.2...HEAD
+[3.2.2]: https://github.com/silenccy/orderflow-station/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/silenccy/orderflow-station/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/silenccy/orderflow-station/compare/v3.1.0...v3.2.0
 [3.1.0]: https://github.com/silenccy/orderflow-station/compare/v3.0.1...v3.1.0
