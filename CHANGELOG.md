@@ -10,6 +10,49 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pressing Center crashed the app.** Reported live on 2026-10-09, then reproduced live
+  and offline from the recorded session. `FootprintItem.paint` read `sc` — the buy/sell
+  colour set — which was only ever a local of a different method, `_generate`, since the
+  configurable colours landed on 2026-09-06. It only ran once the footprint was zoomed in
+  far enough to draw numbers in its cells, so nothing tripped it until a view got that
+  close. Center did: a live footprint opened parked on pyqtgraph's empty-view default (a
+  unit square near zero), Center preserved that 1-unit span, and the result was a 2-bar,
+  ~700 px-per-bar close-up. The `NameError` escaped `paint()`, and PySide answered with an
+  access violation in `QtCore.pyd` — no traceback, no dialog, the window gone. Present in
+  every release from 3.0.0 to 3.2.0; bisected live across 3.0.1, 3.1.0 and 3.2.0.
+- **That was also the 2026-09-08 crash.** Same faulting module, same offset (`0xfd5cb`),
+  same paint frame. 3.0.1 attributed it to a thread being destroyed while running; that
+  bug was real, but it was a diagnosis inferred from code and never reproduced. The 3.0.1
+  entry now carries a correction.
+- **A live chart is on screen by itself.** A footprint that has bars but has never been
+  framed now frames itself — 12 to 40 bars by 24 ticks — instead of sitting on the unit
+  square until Center is pressed. Center from that state gives the same readable frame
+  rather than the 2-bar close-up. A view you have zoomed or panned is never reframed.
+- **The Record button never said Stop.** From 3.1.0 to 3.2.0 its update line sat
+  unreachable after the `return` in `_watch_chip`, carried along when that method was
+  inserted into the session refresh. It updates every second again.
+- **A bug in any custom painter can no longer take the window down.** Every
+  `paint()` in `chart_items.py` — footprint, delta footer, heatmap image, candles, walls,
+  depth bars — now runs under `safe_paint`: an exception is caught, recorded to
+  `crash.log` once per item, the painter is restored, and the frame finishes. Proven on the
+  recorded session first: the same `NameError`, caught with the painter restored, left the
+  app running. The time axis and the heatmap legend, which run inside pyqtgraph's own axis
+  paint, fall back to plain numbers the same way.
+
+### Added
+
+- **`tests/suites/static_names.py`** — every scope in `orderflow/` and `tools/` must only
+  read names that exist. It is pyflakes' core check, built on the standard library's
+  `symtable` so CI needs no new package, and it proves on a probe that it can see a
+  borrowed local like the original bug. Run against 3.2.0 it found both bugs above in
+  milliseconds; the crash had survived a month of tests that never zoomed in far enough.
+- **`tests/suites/paint_safety.py`** — the cell-number pass at deep zoom, called raw
+  without the safety net (verified by hand to raise the original `NameError` on 3.2.0's
+  painter), a raising painter contained and logged once, self-framing, and the Record
+  button.
+
 ## [3.2.0] - 2026-10-07
 
 Minor: visual polish -- new capability, nothing removed, no setting renamed. An app
@@ -173,6 +216,12 @@ and hid the worst of them.
   access violation inside `QtCore.pyd`: no Python traceback, no crash dialog,
   just a vanished window. It now binds, stops and `wait(2000)`s, the same as the
   two other teardown paths already did. Regression test: `tests/suites/feed_lifetime.py`.
+
+  > **Correction (3.2.1):** the thread bug above was real and stays fixed, but it was
+  > **not** what crashed the window on 2026-09-08. That diagnosis was inferred from
+  > reading the code, never reproduced. The same signature returned on 2026-10-09 with
+  > no thread being retired; reproduced live and then offline, the cause was a
+  > `NameError` in the footprint's cell-number pass. See 3.2.1.
 
 ## [3.0.0] - 2026-09-06
 

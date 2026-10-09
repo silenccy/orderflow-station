@@ -813,6 +813,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 % (self.groups[g]["symbol"], len(m.bar_ids()), len(m.trades),
                    format(m.total_volume() / unit, ",.0f"), self.cfg["header_units"],
                    format((m.cvd_y[-1] if m.cvd_y else 0) / unit, ",.0f")))
+        self._frame_new_footprints()
         if self.follow_chk.isChecked():
             self._center_latest(center_y=False)
         if self.debug:
@@ -834,22 +835,48 @@ class MainWindow(QtWidgets.QMainWindow):
                 if isinstance(p, of_panels.FootprintPanel) and not p.isHidden()
                 and (p.group == g or p.group is None)]
 
-    def _center_latest(self, center_y=True):
+    FRAME_BARS = 40         # what an un-zoomed footprint shows when first framed
+    FRAME_TICKS = 24
+
+    @staticmethod
+    def _view_untouched(fp):
+        """True while a footprint still shows pyqtgraph's empty-view default: a
+        unit square near zero. Live, the panel exists before any trade, so that
+        is what it showed -- the chart 'not on screen' until Center was pressed."""
+        (x0, x1), (y0, y1) = fp.p.viewRange()
+        return (x1 - x0) <= 1.0 + 1e-6 and (y1 - y0) <= 1.0 + 1e-6
+
+    def _center_latest(self, center_y=True, panels=None):
         """Snap X to the newest bars and (optionally) centre Y on the last trade,
-        preserving the current zoom spans — unlike autoRange."""
-        for fp in self._active_footprints():
+        preserving the current zoom spans — unlike autoRange.
+
+        An untouched view has no zoom worth preserving: keeping its 1-unit span
+        produced a 2-bar, ~700 px-per-bar close-up, deep enough to draw every
+        cell number -- the path that crashed. It gets a readable frame instead."""
+        for fp in (self._active_footprints() if panels is None else panels):
             m = fp.model()
             n = len(m.bar_ids()) if m else 0
             if not n:
                 continue
+            fresh = self._view_untouched(fp)
             (x0, x1), (y0, y1) = fp.p.viewRange()
-            xspan = max(x1 - x0, 2.0)
+            xspan = min(max(n + 2, 12), self.FRAME_BARS) if fresh else max(x1 - x0, 2.0)
             right = n + max(0.05 * xspan, 0.8)   # margin so the live bar isn't glued on
             fp.p.setXRange(right - xspan, right, padding=0)
-            if center_y and m.trades:
+            if (center_y or fresh) and m.trades:
                 cy = m.trades[-1]["price"]
-                yspan = max(y1 - y0, fp.fp_item._tickval * 4)
+                tick = fp.fp_item._tickval
+                yspan = tick * self.FRAME_TICKS if fresh else max(y1 - y0, tick * 4)
                 fp.p.setYRange(cy - yspan / 2, cy + yspan / 2, padding=0)
+
+    def _frame_new_footprints(self):
+        """Frame any visible footprint that has bars but has never been framed,
+        so a live chart appears by itself instead of waiting for Center."""
+        fresh = [p for p in self.panels
+                 if isinstance(p, of_panels.FootprintPanel) and p.isVisible()
+                 and self._view_untouched(p)]
+        if fresh:
+            self._center_latest(center_y=True, panels=fresh)
 
     def _refresh_summary(self):
         g = self.group_combo.currentText() or "A"
@@ -1162,6 +1189,10 @@ class MainWindow(QtWidgets.QMainWindow):
             "<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>%s%s%s&nbsp;&nbsp;"
             % (of_startup.TOKEN_COLOR[state], ttext, rec, self._watch_chip(),
                self._integrity_chip()))
+        # Record <-> Stop. From 3.1.0 to 3.2.0 this line sat unreachable after the
+        # return in _watch_chip -- carried along when that method was inserted --
+        # so the button never said Stop while recording. static_names caught it.
+        self.rec_btn.setText(" ■ Stop " if alive else " ● Record ")
         title = self._title_text(alive)
         if title != self.windowTitle():          # the taskbar repaints on every set
             self.setWindowTitle(title)
@@ -1188,7 +1219,6 @@ class MainWindow(QtWidgets.QMainWindow):
         return ("<span style='color:#5f6b76'> &nbsp;&middot;&nbsp; </span>"
                 "<span style='color:#7f8792'>watching %d &middot; charting %d</span>"
                 % (watched, charted))
-        self.rec_btn.setText(" ■ Stop " if alive else " ● Record ")
 
     def _integrity_chip(self):
         """Gaps across every open model, deduped: the same hole reaches every model

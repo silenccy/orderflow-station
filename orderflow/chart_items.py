@@ -10,6 +10,7 @@ registry -- each takes a model duck-typed at draw time.
 told you nothing unless you already knew the library.)
 """
 
+import functools
 import math
 from collections import Counter
 from datetime import datetime
@@ -18,10 +19,46 @@ import numpy as np
 from PySide6 import QtCore, QtGui, QtWidgets
 import pyqtgraph as pg
 
+from . import diagnostics
 from .settings import DEFAULTS
 from .theme import (ABSORB_RES, ABSORB_SUP, BEAR, BULL, CELL_BG, CELL_DIV, CELL_NUM,
                     DIM, GRID, HDR_DIM, IMB_BUY, IMB_BUY_BG, IMB_MIN, IMB_RATIO,
                     IMB_SELL, IMB_SELL_BG, IMB_SELL_NUM, POC, TXT, side_colors)
+
+
+def safe_paint(fn):
+    """Keep a bug in a custom paint() from killing the window.
+
+    A Python exception escaping paint() is not reported as a Python error in this
+    app: PySide turns it into a native access violation in QtCore.pyd and the
+    window vanishes with no traceback -- 2026-09-08, and twice on 2026-10-09.
+    Proven on the recorded session: the same NameError, caught with the painter
+    restored, left the app running. So catch it, record it to crash.log once per
+    item (a paint runs many times a second), and let the frame finish: a bug
+    becomes a logged traceback and a blank patch instead of a dead window.
+
+    The outer save/restore puts back pen, brush and transform a failed body left
+    changed. A body that calls painter.save() itself must still pair it with a
+    restore() in try/finally -- QPainter has no public save depth, so nothing out
+    here can unwind a save the body left open."""
+    @functools.wraps(fn)
+    def wrapper(self, painter, *args, **kw):
+        painter.save()
+        try:
+            return fn(self, painter, *args, **kw)
+        except Exception as e:
+            if not getattr(self, "_paint_error_logged", False):
+                try:
+                    self._paint_error_logged = True
+                except Exception:
+                    pass
+                diagnostics.record(type(e), e, e.__traceback__,
+                                   where="%s.paint -- contained, window kept alive"
+                                   % type(self).__name__)
+        finally:
+            painter.restore()
+    return wrapper
+
 
 def _absorption(price, buy, sell, total, hi, lo, ref, floor, ratio):
     """Absorption at a rejected bar extreme: heavy aggressive volume that failed to
@@ -91,9 +128,35 @@ class TimeAxis(pg.AxisItem):
     def epoch_at(self, x):
         return float(np.interp(x, self._xs, self._eps))
 
+    # These run inside AxisItem.paint, so an exception here would escape a paint
+    # and take the window down like any other (see safe_paint). On any error,
+    # record it once and fall back to plain numbers.
     def tickValues(self, minVal, maxVal, size):
         if self._eps is None:
             return super().tickValues(minVal, maxVal, size)
+        try:
+            return self._clock_ticks(minVal, maxVal, size)
+        except Exception as e:
+            self._failed(e)
+            return super().tickValues(minVal, maxVal, size)
+
+    def tickStrings(self, values, scale, spacing):
+        if self._eps is None:
+            return super().tickStrings(values, scale, spacing)
+        try:
+            return [datetime.fromtimestamp(self.epoch_at(v)).strftime(self._fmt)
+                    for v in values]
+        except Exception as e:
+            self._failed(e)
+            return super().tickStrings(values, scale, spacing)
+
+    def _failed(self, e):
+        if not getattr(self, "_error_logged", False):
+            self._error_logged = True
+            diagnostics.record(type(e), e, e.__traceback__,
+                               where="TimeAxis -- fell back to plain numbers")
+
+    def _clock_ticks(self, minVal, maxVal, size):
         t0, t1 = self.epoch_at(minVal), self.epoch_at(maxVal)
         if t1 <= t0:
             return []
@@ -109,11 +172,6 @@ class TimeAxis(pg.AxisItem):
             j = np.clip(np.searchsorted(self._eps, times) - 1, 0, len(seg) - 1)
             times = times[seg[j] <= self._gap]
         return [(float(step), [float(x) for x in np.interp(times, self._eps, self._xs)])]
-
-    def tickStrings(self, values, scale, spacing):
-        if self._eps is None:
-            return super().tickStrings(values, scale, spacing)
-        return [datetime.fromtimestamp(self.epoch_at(v)).strftime(self._fmt) for v in values]
 
 
 # ============================================================
@@ -263,14 +321,27 @@ class FootprintItem(pg.GraphicsObject):
     def boundingRect(self):
         return self._brect
 
+    @safe_paint
     def paint(self, p, *args):
         p.drawPicture(0, 0, self.picture)
         if not self._cells and not self._barstats:
             return                              # candles mode has no cells but keeps headers
-        tick = self._tickval
         tr = p.worldTransform()
         p.save()
-        p.resetTransform()                 # fixed-size text in device space
+        try:
+            p.resetTransform()             # fixed-size text in device space
+            self._paint_overlay(p, tr)
+        finally:
+            p.restore()                    # always: an unbalanced save outlives the item
+
+    def _paint_overlay(self, p, tr):
+        """Cell numbers, bar headers and absorption markers, in device space."""
+        tick = self._tickval
+        # `sc` used to be read below without ever being defined here -- it was a
+        # local of _generate. Harmless until the footprint was zoomed in far enough
+        # to draw cell numbers; then the NameError escaped paint() and took the
+        # window down (2026-09-08, and twice on 2026-10-09 after pressing Center).
+        sc = side_colors(self.cfg)
         font = QtGui.QFont("Consolas"); font.setPixelSize(11)
         boldf = QtGui.QFont("Consolas"); boldf.setPixelSize(11); boldf.setBold(True)
         delta_mode = self.cell_mode == "delta"
@@ -340,13 +411,13 @@ class FootprintItem(pg.GraphicsObject):
                 yt = tr.map(QtCore.QPointF(xi + 0.5, price + tick / 2)).y() - 3
                 tri = [(cx, yt), (cx - s, yt - 2 * s), (cx + s, yt - 2 * s)]
             p.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(*pt) for pt in tri]))
-        p.restore()
 
 
 class SmoothImageItem(pg.ImageItem):
     """ImageItem with bilinear smoothing so the heatmap renders as a continuous
     Bookmap-style liquidity field instead of hard nearest-neighbour rectangles."""
 
+    @safe_paint
     def paint(self, p, *args):
         p.setRenderHint(QtGui.QPainter.RenderHint.SmoothPixmapTransform, True)
         super().paint(p, *args)
@@ -388,28 +459,31 @@ class DeltaFooterItem(pg.GraphicsObject):
     def boundingRect(self):
         return self._brect
 
+    @safe_paint
     def paint(self, p, *args):
         p.drawPicture(0, 0, self.picture)
         if not self._rows:
             return
         tr = p.worldTransform()
         p.save()
-        p.resetTransform()
-        font = QtGui.QFont("Consolas")
-        font.setPixelSize(11)
-        p.setFont(font)
-        p.setPen(QtGui.QPen(TXT))
-        unit = 100 if self.cfg["header_units"] == "lots" else 1
-        for i, d in self._rows:
-            cx = i + 0.5
-            ctr = tr.map(QtCore.QPointF(cx, 0.5))
-            wpx = abs(tr.map(QtCore.QPointF(cx + 0.84, 0.5)).x()
-                      - tr.map(QtCore.QPointF(cx, 0.5)).x())
-            txt = f"{d / unit:+,.0f}"
-            if wpx >= len(txt) * 6.5:
-                p.drawText(QtCore.QRectF(ctr.x() - wpx / 2, ctr.y() - 7, wpx, 14),
-                           QtCore.Qt.AlignmentFlag.AlignCenter, txt)
-        p.restore()
+        try:
+            p.resetTransform()
+            font = QtGui.QFont("Consolas")
+            font.setPixelSize(11)
+            p.setFont(font)
+            p.setPen(QtGui.QPen(TXT))
+            unit = 100 if self.cfg["header_units"] == "lots" else 1
+            for i, d in self._rows:
+                cx = i + 0.5
+                ctr = tr.map(QtCore.QPointF(cx, 0.5))
+                wpx = abs(tr.map(QtCore.QPointF(cx + 0.84, 0.5)).x()
+                          - tr.map(QtCore.QPointF(cx, 0.5)).x())
+                txt = f"{d / unit:+,.0f}"
+                if wpx >= len(txt) * 6.5:
+                    p.drawText(QtCore.QRectF(ctr.x() - wpx / 2, ctr.y() - 7, wpx, 14),
+                               QtCore.Qt.AlignmentFlag.AlignCenter, txt)
+        finally:
+            p.restore()
 
 
 class HeatmapCandleItem(pg.GraphicsObject):
@@ -460,6 +534,7 @@ class HeatmapCandleItem(pg.GraphicsObject):
     def boundingRect(self):
         return self._brect
 
+    @safe_paint
     def paint(self, p, *args):
         p.drawPicture(0, 0, self.picture)
 
@@ -510,6 +585,7 @@ class WallItem(pg.GraphicsObject):
     def boundingRect(self):
         return self._brect
 
+    @safe_paint
     def paint(self, p, *args):
         p.drawPicture(0, 0, self.picture)
 
@@ -526,6 +602,7 @@ class DepthBarDelegate(QtWidgets.QStyledItemDelegate):
 
     COLOR_ROLE = QtCore.Qt.ItemDataRole.UserRole + 2   # optional per-item bar colour
 
+    @safe_paint
     def paint(self, painter, option, index):
         # Order matters: background, then bar, then text. Qt's own pass paints
         # the cell background too, so letting it run last (as this used to) would

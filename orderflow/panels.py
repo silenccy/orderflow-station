@@ -736,11 +736,16 @@ class HeatmapPanel(ChartPanel):
         self.cbar.setColorMap(cm)
 
     def _legend_strings(self, values, scale, spacing):
-        c = self.cfg
-        unit = 100 if c["header_units"] == "lots" else 1
-        return [_compact(of_model.heat_unscale(v, c["hm_scale"], c["hm_gamma"],
-                                               self._eq_order) / unit)
-                for v in values]
+        # runs inside the colour bar's AxisItem.paint: an exception here would
+        # escape a paint and take the window down (see chart_items.safe_paint)
+        try:
+            c = self.cfg
+            unit = 100 if c["header_units"] == "lots" else 1
+            return [_compact(of_model.heat_unscale(v, c["hm_scale"], c["hm_gamma"],
+                                                   self._eq_order) / unit)
+                    for v in values]
+        except Exception:
+            return ["%g" % v for v in values]
 
     def _clear(self):
         self.grid.reset()
