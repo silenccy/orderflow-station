@@ -10,6 +10,8 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-10-10
+
 ### Changed
 
 - **"Big ≥" is per stock, and automatic.** It was one number for every stock — 50 lots —
@@ -548,7 +550,8 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.2.2...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/silenccy/orderflow-station/compare/v3.2.2...v3.3.0
 [3.2.2]: https://github.com/silenccy/orderflow-station/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/silenccy/orderflow-station/compare/v3.2.0...v3.2.1
 [3.2.0]: https://github.com/silenccy/orderflow-station/compare/v3.1.0...v3.2.0
