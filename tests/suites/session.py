@@ -1,5 +1,6 @@
 """Session wiring: the app must never become a second writer, and must never
 leave a lock behind. This is the --view-only flag you used to have to remember."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os
 import sys
 

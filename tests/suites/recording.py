@@ -16,6 +16,7 @@ on disk, which is the only thing recording is for. This one does, end to end
 through the real feed thread, parser and CSV sink, with only the websocket
 faked.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import argparse
 import os
 import struct

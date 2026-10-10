@@ -9,6 +9,7 @@ QtCore.pyd -- no Python traceback, just a dead window.
 That is exactly what happened on 2026-09-08: two crashes, same fault bucket,
 faulting module QtCore.pyd, whenever a symbol left the on-screen set.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import sys
 import threading
 import time

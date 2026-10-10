@@ -1,4 +1,5 @@
 """Check load_subscribe_frame() now picks the NEWEST parseable frame, not the largest."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, tempfile, time
 from pathlib import Path
 from orderflow.feed import load_subscribe_frame

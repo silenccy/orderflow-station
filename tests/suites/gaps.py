@@ -1,4 +1,5 @@
 """Gap ledger downstream: coverage maths, the integrity panel, CVD line breaks."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import math
 import os
 import sys

@@ -9,6 +9,7 @@ landing inside whichever call did the moving.
 The offscreen platform never reproduces the crash, so no other suite here can
 see it. This one asserts the invariant that prevents it instead.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, sys
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

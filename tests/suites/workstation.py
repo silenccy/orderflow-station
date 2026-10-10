@@ -1,4 +1,5 @@
 """Workstation: vap_for_bars, model registry + GC, link groups, roster round-trip."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, sys, json
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

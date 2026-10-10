@@ -1,5 +1,6 @@
 """Failures must be visible even with no console. This is the bug that made every
 problem look like 'nothing happens'."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import sys
 import time
 

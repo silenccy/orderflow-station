@@ -10,6 +10,7 @@ against the 2026-08-31 archive, self.events costs ~36 MB per symbol-hour and is
 never trimmed -- 233 MB for a 6.5 h session, each. So only charted symbols get a
 buffer; watched-only symbols get _tally, which is three counters.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import json
 import sys
 

@@ -4,6 +4,7 @@ The volume profile used to hardcode its RGB, so it silently ignored the palette
 the footprint beside it was using. The brush assertions below are the check that
 would have caught that.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, sys
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

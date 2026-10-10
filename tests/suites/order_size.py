@@ -7,6 +7,7 @@ It compares against what should have been left:
     expected = old_value - consumed_by_trades
     reload   = new_value - expected
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 from orderflow import model as of_model
 
 P = 190

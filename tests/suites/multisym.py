@@ -1,4 +1,5 @@
 """Multi-symbol capture: sink ownership + no snapshot shredding under concurrency."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import asyncio, tempfile
 from pathlib import Path
 

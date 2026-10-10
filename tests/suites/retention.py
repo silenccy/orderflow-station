@@ -12,6 +12,7 @@ Two things that bit this project:
     undated blob and the crash could only be placed in time from the Windows
     event log.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os
 import subprocess
 import sys

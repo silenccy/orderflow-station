@@ -13,6 +13,7 @@ raising painter and logs it once; an untouched footprint frames itself and
 Center gives it a readable frame; and the Record button, whose update line sat
 unreachable from 3.1.0 to 3.2.0, says Stop again while recording.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os
 import sys
 from datetime import datetime

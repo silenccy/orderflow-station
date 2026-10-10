@@ -1,5 +1,6 @@
 """Reconnect + gap ledger. The properties that matter: it heals itself, it records
 every hole, and the reconnect backfill does not double up the tape."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import asyncio
 import time
 

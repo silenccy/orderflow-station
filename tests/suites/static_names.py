@@ -14,6 +14,7 @@ for every scope in every module, a name read as a global must be defined at
 module level (assigned, imported, a def or class, or set via `global`) or be a
 builtin.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import builtins
 import pathlib
 import symtable

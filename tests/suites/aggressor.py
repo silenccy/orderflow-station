@@ -3,6 +3,7 @@
 Every footprint, delta and CVD number depends on this one decision, so it is worth
 pinning down: which source decided, and that the fallback still behaves.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 from orderflow import model as of_model
 
 BID, ASK = 190, 191

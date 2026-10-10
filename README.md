@@ -26,6 +26,10 @@ random-walk session — the shapes are real, the prices are invented. Regenerate
 >   a chat, or a log.
 > - **Not financial advice.** No warranty; see [LICENSE](LICENSE).
 
+**Working on the code?** Start at [For developers](#for-developers): set-up, tests, how to
+work without a live market, the rules this codebase learned the hard way, and how to debug
+a crash that leaves no traceback.
+
 ---
 
 ## What it does
@@ -422,17 +426,22 @@ which is what makes `--replay` a faithful rehearsal rather than a separate code 
 orderflow/
   paths.py     one place for every file location ($ORDERFLOW_DATA overrides the archive)
   feed.py      websocket protocol, frame parsing, CSV persistence, live + replay feeds
-  model.py     pure aggregation, NO Qt — footprint, CVD, volume profile, book, heatmap,
-               trade classification, regime filter
+  model.py     pure aggregation, NO Qt — footprint, CVD, volume profile, book, trade
+               classification, regime filter, and HeatGrid (the heatmap as a level
+               matrix, updated incrementally, with persistent-wall detection)
   theme.py     colours and the dark stylesheet — "what colour is a buy?"
   settings.py  every tunable value + the dialog that edits them (SETTINGS_SPEC is the
                single source of truth: add a row and the setting appears)
-  chart_items.py  the pyqtgraph primitives that paint the charts (footprint clusters,
-               delta bars, heatmap candles, DOM depth bars)
+  chart_items.py  the pyqtgraph primitives that paint the charts — footprint clusters,
+               delta bars, heatmap candles and walls, DOM depth bars, the clock-time
+               axis — and safe_paint, which every custom paint() must wear
   panels.py    every widget as a dockable Panel (footprint, heatmap, DOM, watchlist, ...)
-  app.py       PySide6/pyqtgraph window: model registry, link groups, live feed threads
+  app.py       the window: model registry, link groups, watchlist, live feed threads,
+               and who writes the archive (chart_writes)
+  brand.py     the app icon, drawn in code, and its Windows taskbar identity
   startup.py   the dialogs that replace the CLI (Start, Get token, command reference)
-  diagnostics.py  crash/launch logging and --doctor; installed BEFORE the Qt import
+  diagnostics.py  crash/launch logging and --doctor (Diagnose.bat); installed BEFORE
+               the Qt import
   backtest.py  walk-forward regime evaluation, no GUI
   capture.py   the recorder, and the writer lock every writer shares
 Orderflow Station.bat   double-click launcher (pythonw = no console window)
@@ -452,16 +461,20 @@ would kill it. Shutdown is equally indirect: `data/capture.stop` is a request, a
 writer closes its `CsvSink` and removes the lock itself. Nothing is killed mid-write.
 
 The recorder is started **detached**, not as a child process, so closing the chart does not
-stop your capture — which is the entire point of having a recorder.
+stop your capture — which is the entire point of having a recorder. When recording is asked
+for from the Start dialog the recorder is the only writer and the chart is a reader
+(`app.chart_writes`); only a plain `--live` run makes the chart write.
 
 The window keeps a registry of models keyed by `(symbol, bar_kind, bar_size)`, built lazily
-and dropped when no open panel is bound to them, plus one live feed thread per symbol
-actually on screen. That is why a second footprint on another symbol costs you a connection
-and a model, and nothing else.
+and dropped when no open panel is bound to them. It runs **one feed thread per watched
+symbol** — the watchlist plus anything a panel charts — started in `start_live()`, never
+during construction. Retention is tiered: only symbols a visible panel draws keep a replay
+buffer (book snapshots capped by `book_buffer`, trades never dropped); a symbol that is only
+watched costs a connection and three counters.
 
 The **model layer has no Qt dependency**: `feed → model` is fully usable headless, which
 is how the backtest and daemon work. Both live and replay emit the same
-`("book" | "trade" | "summary", …)` event stream, so the GUI can't tell them apart.
+`("book" | "trade" | "summary" | "gap", …)` event stream, so the GUI can't tell them apart.
 
 Captured data lands in `data/` as `book.csv`, `trades.csv`, `summary.csv` and a raw
 `capture_raw.jsonl`. Point `ORDERFLOW_DATA` elsewhere to keep the archive off the repo drive.
@@ -506,20 +519,116 @@ Thresholds — refill share, order-count tolerance, minimum occurrences — are 
 **Settings → DOM & Tape**. It has so far been checked only against recorded sessions, not
 against a live market.
 
-## Development
+## For developers
+
+Read this section top to bottom once. Most of it is here because something broke without
+it.
+
+### Set up
 
 ```bash
-pip install -e ".[dev]"
-pytest                       # 10 suites, ~12s
-pytest -k reconnect          # one of them
-python tests/run_all.py      # same, without pytest
+python -m venv .venv
+```
+```bash
+.venv\Scripts\python.exe -m pip install -e ".[dev]"
 ```
 
-Every suite runs in its own process against a throwaway `ORDERFLOW_DATA`, so a test can
-never touch your real archive — and so the ones that monkeypatch module globals or build a
-`QApplication` cannot leak into each other. [tests/README.md](tests/README.md) explains the
-layout and what each suite covers. CI runs the same command on Windows for Python 3.10 and
-3.12.
+Windows is the primary platform (it is what CI runs). One command per block on purpose:
+Windows PowerShell 5.1 rejects `&&`.
+
+### Run the tests
+
+```bash
+python tests/run_all.py
+```
+```bash
+python tests/run_all.py recording
+```
+
+The first runs all 25 suites (about 80 s on a laptop); the second runs one by name. `pytest`
+and `pytest -k recording` do the same thing. Every suite runs in its own process against a
+**throwaway `ORDERFLOW_DATA`**, so the ones that monkeypatch module globals or build a
+`QApplication` cannot leak into each other.
+
+**Never run a suite file directly.** Suites write into the data folder — `recording.py`
+writes a fake subscribe frame, `diagnostics.py` overwrites `trades.csv` and `book.csv` — and
+run as plain scripts that folder would be your real `data/`, holding your session token and
+archive. Each suite now imports `tests/suites/_safety.py` first, which refuses to start
+without a throwaway folder; keep that import first in any suite you add.
+
+`static_names.py` is pyflakes' undefined-name check on the standard library: it reads every
+module in `orderflow/` and `tools/` and fails on any name that does not exist. The crash
+fixed in 3.2.1 was exactly that, hidden in a code path that only ran at deep zoom.
+[tests/README.md](tests/README.md) explains the layout and what each suite covers. CI runs
+the full set on Windows for Python 3.10 and 3.12.
+
+### Work without a live market
+
+The market is open about six hours a day; most work happens outside them.
+
+- **Replay** is the same event stream as live (see Architecture), so
+  `python -m orderflow.app --replay` charts whatever is in `data/` and exercises every panel.
+- **Headless render** for checking a change by eye:
+  `python -m orderflow.app --replay --shot out.png`.
+- **Reproduce against real recorded data without touching it.** Set `ORDERFLOW_DATA` to a
+  scratch folder so every write goes there, and read the real archive through explicit
+  paths: `feed.replay_feed(book_csv=..., trades_csv=..., summary_csv=...)`. That is how the
+  3.2.1 crash was reproduced offline — headless, in a loop, without waiting for the open.
+- **Fake the websocket, keep everything else real.** `tests/suites/recording.py` encodes
+  trades in the real wire format and serves them through a fake `websockets.connect`, so the
+  real feed thread, parser and CSV sink all run. Copy that pattern for anything feed-shaped.
+- The README screenshots are **synthetic** (`tools/make_previews.py`). Never judge real-data
+  behaviour from them: the heatmap's striping above IDX tick-size boundaries was invisible in
+  the previews and obvious on real BUMI data.
+
+### Rules this codebase learned the hard way
+
+Each one was a real bug; the version that fixed it is in brackets.
+
+1. **No exception may escape a `paint()`.** PySide turns it into a native access violation
+   in `QtCore.pyd`: the window vanishes, no traceback, no dialog. Decorate every custom
+   painter with `chart_items.safe_paint`, and pair every `painter.save()` with a `restore()`
+   in `try/finally`. Code that runs *inside* pyqtgraph's own paint — axis `tickStrings`,
+   legend labels — needs the same care. *(3.2.1)*
+2. **Never drop the last reference to a running `QThread`.** Retire a feed with `stop()`
+   then `wait()`, as `_sync_feeds` does. `FeedThread.stop()` is safe at any moment after
+   `start()`; it used to be ignored in the thread's first instant. *(3.0.1, 3.2.2)*
+3. **Feeds start in `start_live()`, never during construction**, so they carry the sink the
+   window decides on. *(3.2.2)*
+4. **Exactly one process writes the archive**, arbitrated by `data/capture.lock`. Liveness is
+   the lock's mtime heartbeat — never `os.kill(pid, 0)`, which on Windows *terminates* the
+   process. Anything new that writes must take the lock and heartbeat it. *(2.0.0, 3.2.2)*
+5. **Under `pythonw` there is no stdout or stderr.** Anything a user must see goes to a file
+   in `data/` (`launch.log`, `crash.log`, `capture.log`); `diagnostics.install()` adopts real
+   streams before Qt is imported. A recorder refusal printed only to stderr once made
+   recording silently fail. *(2.0.0, 3.2.2)*
+6. **Units.** Order-book `value` is **shares** (`lots = value / 100`). Instrument tick size
+   comes from the **book ladder**, not traded prices — a sparse day or an off-tick
+   negotiated print otherwise corrupts the price grid. IDX changes tick size at
+   200 / 500 / 2,000 / 5,000, so never assume one tick per chart. *(the bands: 3.1.0)*
+7. **Memory.** `self.events` is the replay buffer models rebuild from: only charted symbols
+   keep one, book snapshots are capped by `book_buffer`, trades are never dropped. A liquid
+   symbol uncapped is ~36 MB per hour. *(3.1.0)*
+8. **The subscribe frame is a live credential.** Never commit, print or log it; `data/` is
+   gitignored and must stay so.
+
+### Debugging a crash that leaves no traceback
+
+1. Open `data/crash.log` and find the run: every launch writes a dated
+   `faulthandler armed (pid N)` header, and any native dump below it belongs to that run.
+   **Diagnose.bat** summarises today's runs, crashes and recordings.
+2. Read the thread marked **Current thread**; the first one listed is often an idle
+   bystander. Even that stops where Python handed control to Qt: the 3.2.1 crash read
+   `GraphicsView.paintEvent` and nothing more, because the item that raised was called
+   from C++. It tells you *when*, not *where*. Ask Windows which module faulted:
+   ```powershell
+   Get-WinEvent -FilterHashtable @{LogName='Application'; ProviderName='Application Error'; StartTime=(Get-Date).AddDays(-1)} | Select-Object -First 3 TimeCreated, Message | Format-List
+   ```
+3. **Reproduce before you fix.** The 2026-09-08 crash was diagnosed from reading code, the
+   fix was real but the wrong one, and the crash came back a month later. Reproduce it live
+   if you must, then offline from the recorded session (see above), narrow it by removing
+   panels or settings until it stops, and only then change code.
+4. Prove the fix both ways: the new test fails on the old code and passes on the new.
 
 ### Releasing
 
@@ -529,10 +638,12 @@ release:
 
 1. Bump `__version__` — MAJOR if an existing setup breaks (a removed flag, a changed
    on-disk format, a public function that behaves differently), MINOR for new capability,
-   PATCH for fixes.
+   PATCH for fixes. Then `pip install -e . --no-deps` so the installed metadata picks up
+   the new number; the version suite compares the two.
 2. Move the `Unreleased` entries in [CHANGELOG.md](CHANGELOG.md) under the new version and
    add its compare link.
-3. `pytest` — the version suite checks the two agree and that the release is documented.
+3. `python tests/run_all.py` — the version suite checks the two agree and that the
+   release is documented.
 4. Merge to `main` **first**, then tag that commit. Check what you are standing on before
    tagging: `git checkout main` on an unmerged repo silently lands you on the *old* tip,
    and the tag then marks code that never contained the release.
@@ -558,17 +669,23 @@ git tag -a vX.Y.Z -m "orderflow-station X.Y.Z"
 git push origin vX.Y.Z
 ```
 
-   One command per block on purpose: Windows PowerShell 5.1 rejects `&&` as a statement
-   separator, so chained one-liners fail to parse there.
+5. Publish the GitHub release from that tag, with the version's CHANGELOG section as the
+   notes, and check the CI run on `main` is green.
+
+### Where else to look
 
 - Architecture and design rationale: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
-- `python -m compileall -q orderflow tools tests` — quick syntax gate.
+- Frame formats, units and gotchas: **[docs/protocol.md](docs/protocol.md)**.
 - The GUI is layered so each file answers one question: `theme.py` *what colour is
   this?*, `settings.py` *what can the user change?*, `chart_items.py` *how is it
   painted?*, `panels.py` *what widgets exist?*, `app.py` *how do they fit together?*
   Adding a widget means one class in `panels.py` with a `@register` decorator and one
   line in `app.py`'s `PANEL_MENU`.
-- The GUI renders headless for verification: `python -m orderflow.app --replay --shot out.png`.
+- `startup.py` holds the Start/token/help dialogs. `StartDialog.values()` returns exactly
+  the keys `main()` reads, so the dialog and the flags build an identical window — if you
+  add a flag, add it to both.
+- The writer lock lives in `capture.py` (`writer_status` / `take_lock` / `touch_lock` /
+  `request_stop`) — the only API rule 4 allows.
 - `tools/decode_frame.py` dumps an unknown protobuf frame's field structure — the tool
   used to decode the trade format.
 - `tools/probe_multisub.py ASII BBCA` answers, against the live server, whether one
@@ -576,19 +693,8 @@ git push origin vX.Y.Z
   replaces the first (`SWITCH`). `capture.py` assumes `SWITCH` and opens one socket per
   symbol, which is correct either way; a `MULTIPLEX` result just means it could be cheaper.
   Needs a valid token and market hours.
-- `startup.py` holds the Start/token/help dialogs. `StartDialog.values()` returns exactly
-  the keys `main()` reads, so the dialog and the flags build an identical window — if you
-  add a flag, add it to both.
-- The writer lock lives in `capture.py` (`writer_status` / `take_lock` / `touch_lock` /
-  `request_stop`). Any new component that writes the archive must take the lock and
-  heartbeat it, or other writers will correctly conclude it is dead.
-- `tools/make_previews.py` regenerates the README images from a synthetic session.
-- Frame formats, units and gotchas: **[docs/protocol.md](docs/protocol.md)**.
-
-Two units traps worth knowing before touching aggregation code: order-book `value` is
-**shares** (`lots = value / 100`), and instrument tick size is derived from the **book
-ladder**, not from traded prices — a sparse day or an off-tick negotiated print
-otherwise corrupts the price grid.
+- `python -m compileall -q orderflow tools tests` — a one-second syntax gate before the
+  full run.
 
 ## License
 

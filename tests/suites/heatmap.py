@@ -12,6 +12,7 @@ What this suite pins, each one a way the old heatmap was hard to use:
     7 Hz) even when no column had arrived. Updates are incremental, and a
     refresh with nothing new does not repaint the field at all.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import math
 import os
 import sys

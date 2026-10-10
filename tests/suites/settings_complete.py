@@ -8,6 +8,7 @@ Three ways the settings surface rots, all silent:
 The third one is the reason this suite exists: `vap_mode` sat in the dialog for a
 while labelled "Vol@price range (new panels)" while no code read it.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, pathlib, re, sys
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

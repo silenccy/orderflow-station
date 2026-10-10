@@ -1,4 +1,5 @@
 """main() glue: when the Start dialog appears, and that its answers drive the window."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import sys
 
 from PySide6 import QtCore, QtWidgets

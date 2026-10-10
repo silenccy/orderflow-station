@@ -6,6 +6,7 @@ said nothing; ASII's mostly do not, so almost nothing lit up. Now each stock
 gets its own threshold: your number if you set one for it, otherwise auto, its
 own 95th-percentile print -- roughly its top 5 %.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import json
 import os
 import random

@@ -37,6 +37,20 @@ capability without breaking anything. **PATCH** is fixes only.
 - **`tests/suites/big_prints.py`** — two stocks with very different print sizes get their
   own thresholds and each lights about 5 % of its prints; overrides are per stock, persist,
   and hand back to auto; the tape lights its own big prints, not all of them.
+- **A "For developers" guide in the README**: set-up, running the 25 suites, working without
+  a live market (replay, headless render, reproducing against recorded data in a scratch
+  folder), the eight rules this codebase learned from real bugs, and a playbook for crashes
+  that leave no traceback. `tests/README.md` now lists every suite, not the first ten.
+
+### Fixed
+
+- **Running a suite file directly could overwrite your real token and archive.** Suites
+  write into the data folder — `recording.py` a fake subscribe frame, `diagnostics.py` its
+  own `trades.csv` and `book.csv` — and only the runner points that at a throwaway folder.
+  Started as `python tests/suites/recording.py`, the data folder was the real `data/`.
+  Every suite now imports `tests/suites/_safety.py` first, which refuses to start unless
+  `ORDERFLOW_DATA` is set to a folder other than the repo's `data/`, and says how to run it
+  instead. Nothing was lost: it was caught before it happened.
 
 ## [3.2.2] - 2026-10-09
 

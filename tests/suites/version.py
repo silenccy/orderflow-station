@@ -5,6 +5,7 @@ orderflow/__init__.py -- which drift the moment someone bumps one and forgets
 the other. pyproject now derives it from the package, and this suite proves the
 derivation actually holds in an installed environment.
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import importlib.metadata as md
 import re
 import subprocess

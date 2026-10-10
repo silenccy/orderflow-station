@@ -10,6 +10,7 @@
   * the tape speaks header_units like every other panel
   * the README preview no longer flattens the regime chart
 """
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os
 import sys
 from datetime import datetime

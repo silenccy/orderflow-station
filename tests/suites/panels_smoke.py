@@ -1,4 +1,5 @@
 """Every panel kind refreshes without error; visible-range VAP and measure work."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import os, sys
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 

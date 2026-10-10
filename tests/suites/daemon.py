@@ -1,4 +1,5 @@
 """Daemon lifecycle: cooperative stop, clean sink close, one-writer refusal."""
+import _safety  # noqa: F401 -- keep first: refuses to run against the real archive
 import asyncio, os, subprocess, sys, time
 from pathlib import Path
 
