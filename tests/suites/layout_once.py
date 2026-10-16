@@ -63,4 +63,25 @@ print("PASS: saved layout restored, %d panels docked, %d arrangement pass(es)"
       % (len(win2.panels), n2))
 
 S2.clear()
+
+# ---- 3. a foreign saved layout must not stop the arrangement ---------------
+# (2026-10-16: the v2 app left a winstate naming only 'booktape' and 'controls' in the
+# shared settings scope. restoreState() accepted it, _default_layout was skipped, and
+# all eight panels piled into one Left column.)
+old = QtWidgets.QMainWindow()
+dock = QtWidgets.QDockWidget("book/tape")
+dock.setObjectName("booktape")
+old.addDockWidget(QtCore.Qt.DockWidgetArea.RightDockWidgetArea, dock)
+old.addToolBar("controls").setObjectName("controls")
+foreign = old.saveState()
+
+win3, n3, S3 = startup("layout_foreign", seed={"winstate": foreign})
+assert n3 == 1, "a winstate naming none of our docks must fall back to the default " \
+                "arrangement (got %d passes)" % n3
+areas = {win3.dockWidgetArea(p) for p in win3.panels}
+assert len(areas) > 1, "every panel was left in one dock area: %s" % areas
+print("PASS: a foreign/old winstate is ignored; default arrangement used (%d areas)"
+      % len(areas))
+
+S3.clear()
 print("\nALL PASS")

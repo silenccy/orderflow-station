@@ -808,10 +808,16 @@ class MainWindow(QtWidgets.QMainWindow):
         restored = False
         st = self.settings.value("winstate")
         if isinstance(st, (QtCore.QByteArray, bytes, bytearray)):
-            try:
-                restored = bool(self.restoreState(st))
-            except (TypeError, ValueError):
-                restored = False
+            # Qt stores dock names as UTF-16BE. A state naming none of our docks is
+            # not ours -- the v2 app shares this settings scope and left one behind
+            # (2026-10-16) -- yet restoreState() still returns True for it, which
+            # skipped the arrangement and stacked every panel in one column.
+            blob = bytes(st.data()) if isinstance(st, QtCore.QByteArray) else bytes(st)
+            if any(p.objectName().encode("utf-16-be") in blob for p in self.panels):
+                try:
+                    restored = bool(self.restoreState(st))
+                except (TypeError, ValueError):
+                    restored = False
         if not restored:
             self._default_layout()
         # safety net: a saved state where EVERY panel is hidden leaves a blank

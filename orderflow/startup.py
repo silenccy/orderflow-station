@@ -85,17 +85,9 @@ def archive_symbols(max_rows=400000):
 
 
 def newest_frame():
-    """The frame load_subscribe_frame() would pick: newest that parses."""
-    best = None
-    for p in DATA_DIR.glob("subscribe_*.txt"):
-        try:
-            of_feed.parse_frame_file(p)
-            mt = p.stat().st_mtime
-        except (OSError, ValueError):
-            continue
-        if best is None or mt > best[0]:
-            best = (mt, p)
-    return best[1] if best else None
+    """The frame load_subscribe_frame() would pick (same rule, same function)."""
+    picked = of_feed.pick_subscribe_frame(DATA_DIR)
+    return picked[0] if picked else None
 
 
 def _age_text(seconds):
@@ -414,11 +406,13 @@ class TokenDialog(QtWidgets.QDialog):
         fresh = mt > self._seen_mt
         state, text = token_status()
         self.status.setText(
-            "<span style='color:%s'>%s %s - %d bytes, native symbol %s.</span>"
+            "<span style='color:%s'>%s %s - %d bytes, %d symbol fields, native "
+            "symbol %s.</span>"
             "<br><span style='color:#7f8792'>Any 4-letter ticker works from this "
-            "one frame.</span>"
+            "one frame. Of several frames from one grab, the one with the most "
+            "symbol fields is used.</span>"
             % (TOKEN_COLOR[state], "Captured" if fresh else text, p.name,
-               len(frame), sym.decode() if sym else "?"))
+               len(frame), of_feed.frame_channels(frame), sym.decode() if sym else "?"))
 
 
 # ============================================================

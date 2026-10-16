@@ -40,7 +40,7 @@ from .paths import (BOOK_CSV, DATA_DIR, GAPS_CSV,  # noqa: F401 (re-exported)
                     RAW_LOG, SUMMARY_CSV, TRADES_CSV)
 
 WS_URL = "wss://wss-jkt.trading.stockbit.com/ws"
-SUBSCRIBE_FILE = None            # None -> auto-pick largest valid subscribe_*.txt
+SUBSCRIBE_FILE = None  # None -> pick_subscribe_frame(): newest grab, most channels
 
 PING_BYTES = bytes([34, 6, 10, 4, 112, 105, 110, 103])  # 0x22 0x06 0x0a 0x04 'ping'
 PING_EVERY_SEC = 10
@@ -86,36 +86,55 @@ def parse_frame_file(path: Path) -> bytes:
     return bytes(nums)
 
 
+GRAB_WINDOW_SEC = 600    # frames saved this close together come from one grab
+
+
+def pick_subscribe_frame(directory=None):
+    """(path, frame) of the subscribe frame to use, or None if there is none.
+
+    The newest GRAB wins, and within that grab the frame with the most channels.
+    Newest, because the token inside expires (~24h): yesterday's 922B frame is as
+    big as today's and useless. Most channels, because one grab saves several
+    frames seconds apart and the newest is not always the richest: on 2026-10-16
+    the 916B frame (no trade channel) landed a second after the 922B one, and a
+    newest-wins rule recorded a whole session of books with no trades.
+    Empty or symbol-less files never win -- they would subscribe nothing."""
+    directory = Path(directory) if directory is not None else DATA_DIR
+    candidates = []  # (mtime, channels, path, frame)
+    for p in directory.glob("subscribe_*.txt"):
+        try:
+            frame = parse_frame_file(p)
+            mt = p.stat().st_mtime
+        except (OSError, ValueError):
+            continue  # unreadable, or not decimal bytes (e.g. an analytics frame)
+        ch = frame_channels(frame)
+        if ch:
+            candidates.append((mt, ch, p, frame))
+    if not candidates:
+        return None
+    newest = max(c[0] for c in candidates)
+    grab = [c for c in candidates if newest - c[0] <= GRAB_WINDOW_SEC]
+    _mt, _ch, p, frame = max(grab, key=lambda c: (c[1], c[0]))
+    return p, frame
+
+
 def load_subscribe_frame(subscribe_file=None, directory=None):
     """Return (frame_bytes, source_name). Uses an explicit file if given, else the
-    NEWEST subscribe_*.txt in `directory` that parses as decimal bytes.
-
-    Newest, not largest: the token inside is what expires (~24h), so a stale frame
-    is useless however big it is. Within one browser session the catcher only
-    downloads frames LARGER than the last, so the newest file is also the
-    richest-channel one — the two rules agree there and disagree only across days,
-    where freshness is what matters. (Yesterday's 922B and today's 922B are the
-    same size, so a largest-wins rule would silently keep the expired one.)"""
-    directory = Path(directory) if directory is not None else DATA_DIR
+    frame pick_subscribe_frame() chooses from `directory`."""
     sf = subscribe_file if subscribe_file is not None else SUBSCRIBE_FILE
     if sf:
         p = Path(sf)
         return parse_frame_file(p), p.name
 
-    candidates = []  # (mtime, name, bytes)
-    for p in Path(directory).glob("subscribe_*.txt"):
-        try:
-            frame = parse_frame_file(p)
-        except ValueError:
-            continue  # not decimal bytes (e.g. an analytics/text frame)
-        candidates.append((p.stat().st_mtime, p.name, frame))
-    if not candidates:
+    directory = Path(directory) if directory is not None else DATA_DIR
+    picked = pick_subscribe_frame(directory)
+    if picked is None:
         raise FileNotFoundError(
             f"No parseable subscribe_*.txt in {directory} — grab a frame with the "
             "browser console catcher first (see README 'Get a session token')."
         )
-    _mt, name, frame = max(candidates, key=lambda c: c[0])
-    return frame, name
+    p, frame = picked
+    return frame, p.name
 
 
 def frame_symbol(base: bytes):
@@ -125,6 +144,14 @@ def frame_symbol(base: bytes):
         if base[i] == 0x04 and all(65 <= base[i + 1 + j] <= 90 for j in range(4)):
             return base[i + 1:i + 5]
     return None
+
+
+def frame_channels(base: bytes) -> int:
+    """How many symbol fields (0x04 + ticker) a subscribe frame carries: one per
+    feed channel it subscribes, plus fixed ones. Only meaningful compared with
+    another frame (real grabs: 922B -> 6, 916B -> 5, 898B -> 2)."""
+    native = frame_symbol(base)
+    return base.count(b"\x04" + native) if native else 0
 
 
 def make_subscribe_for(base: bytes, symbol: str) -> bytes:
@@ -461,7 +488,8 @@ async def live_feed(symbol, subscribe_file=None, persist=True, raw=True,
 
     `sink`: pass a shared CsvSink to run several symbols into ONE archive."""
     base, src = load_subscribe_frame(subscribe_file)
-    yield ("status", "loaded subscribe frame %dB from %s" % (len(base), src))
+    yield ("status", "loaded subscribe frame %dB (%d symbol fields) from %s"
+           % (len(base), frame_channels(base), src))
 
     owns_sink = sink is None
     if owns_sink and persist:
