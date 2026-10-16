@@ -10,6 +10,31 @@ capability without breaking anything. **PATCH** is fixes only.
 
 ## [Unreleased]
 
+## [3.3.1] - 2026-10-16
+
+Patch: fixes only. The first live session on a second PC recorded books and no trades,
+and opened with every panel stacked in one column. Both reproduced from that session's
+files and fixed; settings and files are unchanged.
+
+### Fixed
+
+- **A whole session recorded no trades.** One token grab saves several frames seconds
+  apart; on 2026-10-16 they were 898, 922 and 916 bytes, and the 916-byte one -- which
+  lacks the trade channel -- landed last. The loader took the newest, so the recorder and
+  the chart subscribed to everything but trades: 4.2M book rows, 25k summaries, and a
+  `trades.csv` holding only its header. The footprint, CVD, Vol@Price and tape all draw
+  from trades, so there was no chart. The loader now takes the newest *grab* (frames
+  within 10 minutes of the newest) and, within it, the frame with the most symbol fields
+  (922 B: 6, 916 B: 5); yesterday's frame still loses to today's. Empty or symbol-less
+  files never win. The first status line -- in `capture.log` and the status bar -- and
+  the Token dialog now give the field count, e.g. `loaded subscribe frame 922B
+  (6 symbol fields)`. The token chip and Diagnose name the same file the feed uses.
+- **The layout opened as one column of eight panels.** The v2 app saved its window state
+  in the same settings scope, naming only its own `booktape` dock. `restoreState()`
+  accepted that state, so the default arrangement was skipped and every panel stayed
+  where it was first docked. A saved state that names none of this version's panels is
+  now ignored and the default 4x2 arrangement is used.
+
 ## [3.3.0] - 2026-10-10
 
 ### Changed
@@ -550,7 +575,8 @@ Initial public release: footprint charts, liquidity heatmap, volume profile, CVD
 DOM ladder and trade tape over the Stockbit Pro market-data websocket, plus the
 walk-forward regime backtest.
 
-[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/silenccy/orderflow-station/compare/v3.3.1...HEAD
+[3.3.1]: https://github.com/silenccy/orderflow-station/compare/v3.3.0...v3.3.1
 [3.3.0]: https://github.com/silenccy/orderflow-station/compare/v3.2.2...v3.3.0
 [3.2.2]: https://github.com/silenccy/orderflow-station/compare/v3.2.1...v3.2.2
 [3.2.1]: https://github.com/silenccy/orderflow-station/compare/v3.2.0...v3.2.1
